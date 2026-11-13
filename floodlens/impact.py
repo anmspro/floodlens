@@ -83,7 +83,7 @@ def nfip_claims(s: Settings, log=print) -> list[dict]:
     m = pd.read_csv(s.dataset_dir / "image_metadata.csv", dtype="string", keep_default_na=False)
     counties = sorted(set(m[m.locality.isin(s.area["localities"])].county_geoid) - {""})
     a, b = s.event["window"]
-    claims = []
+    claims, partial = [], []
     fields = ("dateOfLoss,countyCode,censusGeoid,waterDepth,exteriorWaterDepth,interiorWaterDepth,buildingDamageAmount,"
               "buildingPropertyValue,amountPaidOnBuildingClaim,amountPaidOnContentsClaim,occupancyType")
     for cc in counties:
@@ -101,7 +101,10 @@ def nfip_claims(s: Settings, log=print) -> list[dict]:
                     import time as _t
                     _t.sleep(15 * (attempt + 1))
             if body is None:
-                raise RuntimeError(f"NFIP county {cc} failed after retries")
+                # OpenFEMA stops answering deep pages for very large counties; keep what we have
+                log(f"[{s.area_id}] NFIP county {cc}: keeping {skip} claims (later pages unavailable)")
+                partial.append(cc)
+                break
             rows = body.get("NfipClaims", [])
             claims += rows
             if len(rows) < 2000:
@@ -109,7 +112,7 @@ def nfip_claims(s: Settings, log=print) -> list[dict]:
             skip += 2000
         log(f"[{s.area_id}] NFIP claims county {cc}: {sum(1 for c in claims if c.get('countyCode') == cc)}")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"fetched_at": now_iso(), "source": "OpenFEMA NfipClaims v3", "claims": claims}))
+    p.write_text(json.dumps({"fetched_at": now_iso(), "source": "OpenFEMA NfipClaims v3", "partial_counties": partial, "claims": claims}))
     return claims
 
 
