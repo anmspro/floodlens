@@ -249,3 +249,5 @@ ol.steps { margin: 6px 0; padding-left: 22px; } ol.steps li { margin: 2px 0; }
 .maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib a { color: var(--muted) !important; }
 .maplibregl-ctrl-scale { background: var(--glass-soft); color: var(--ink); border-color: var(--muted); }
 .theme-btn { border: 1px solid var(--rule); background: var(--glass-soft); border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
+
+details.rej { margin-top: 12px; } details.rej summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 2px; }

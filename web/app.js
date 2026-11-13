@@ -237,7 +237,7 @@ function renderZones() {
 
 function renderMarkers() {
   state.markers.forEach((m) => m.remove()); state.markers = [];
-  for (const f of sortedZones().slice(0, 20)) {
+  for (const f of sortedZones().slice(0, 10)) {
     const p = f.properties; if (!p.label_point) continue;
     const el = document.createElement("div");
     el.className = "zmark"; el.textContent = rankOf(p); el.dataset.zone = p.id; el.title = `${p.label}: ~${Math.round(p.est_pop)} people`;
@@ -262,18 +262,26 @@ function renderFacilities() {
   }).join("") : `<p class="empty">No hospitals, schools or care homes mapped in this area.</p>`;
 }
 
+const KIND = { parking: "Parking lot", pitch: "Sports field", park: "Park", school: "School grounds", college: "College grounds",
+  university: "University grounds", community_centre: "Community centre", place_of_worship: "Place of worship",
+  sports_centre: "Sports centre", recreation_ground: "Recreation ground", playground: "Playground" };
+const kindName = (k) => KIND[k] || String(k || "Open area").replace("_", " ");
 function renderRelief() {
   const r = state.relief, sites = state.sites?.features || [];
   if (!r) { $("#relief").innerHTML = `<p class="empty">Relief sites are not computed for this area yet.</p>`; return; }
   const rec = sites.filter((f) => f.properties.status === "recommended").sort((a, b) => a.properties.rank - b.properties.rank);
-  const other = sites.filter((f) => f.properties.status !== "recommended").sort((a, b) => b.properties.need_within_walk - a.properties.need_within_walk);
+  const order = { ok: 0, uncertain: 1, rejected: 2 };
+  const other = sites.filter((f) => f.properties.status !== "recommended")
+    .sort((a, b) => (order[a.properties.status] - order[b.properties.status]) || (b.properties.need_within_walk - a.properties.need_within_walk));
   const card = (f) => { const p = f.properties; return `<div class="card site ${p.status}" data-site="${esc(p.id)}">
-      <b>${p.rank ? `#${p.rank} · ` : ""}${esc(p.name || p.kind.replace("_", " "))}</b> <span class="m">${fmt(p.area_m2)} m²</span>
+      <b>${p.rank ? `#${p.rank} · ` : ""}${esc(p.name || kindName(p.kind))}</b> <span class="m">${fmt(p.area_m2)} m²</span>
       <div class="m">${esc(p.use)}${p.status === "recommended" ? ` · serves ~${fmt(p.new_people_served)} more people` : ` · ${esc(p.status)}`}</div></div>`; };
   $("#relief").innerHTML = `<div class="card"><div class="big">${rec.length} site${rec.length === 1 ? "" : "s"}</div>
       <div class="m">cover ~${fmt(r.people_covered)} people within ${fmt(r.walk_m)} m walking (${Math.round((r.need_covered_share || 0) * 100)}% of weighted need). Checked ${r.candidates} open areas: ${r.status.uncertain} unsure, ${r.status.rejected} rejected.</div></div>
     <h4>Recommended</h4>${rec.map(card).join("") || `<p class="empty">No site passed every check.</p>`}
-    <h4>Other candidates</h4>${other.slice(0, 12).map(card).join("")}`;
+    <h4>Also passed or unsure</h4>${other.filter((f) => f.properties.status !== "rejected").map(card).join("") || `<p class="empty">None.</p>`}
+    <details class="rej"><summary>Rejected (${other.filter((f) => f.properties.status === "rejected").length}), with reasons</summary>
+      ${other.filter((f) => f.properties.status === "rejected").slice(0, 30).map(card).join("")}</details>`;
 }
 
 const IMPACT_WORD = { none: "no new water", partial: "some water nearby", surrounded: "surrounded by water", hidden: "hidden by trees",
@@ -444,7 +452,7 @@ function showSite(id) {
   const p = f.properties, l = p.label || {};
   map.fitBounds(bboxOf(f.geometry), { padding: PAD(), maxZoom: 18 });
   $("#evidence").classList.remove("collapsed"); $("#ev-body").classList.remove("one");
-  $("#ev-title").innerHTML = `${esc(p.name || p.kind.replace("_", " "))} <span class="st ${p.status === "recommended" || p.status === "ok" ? "open" : p.status === "uncertain" ? "uncertain" : "pending"}">${esc(p.status)}</span>`;
+  $("#ev-title").innerHTML = `${esc(p.name || kindName(p.kind))} <span class="st ${p.status === "recommended" || p.status === "ok" ? "open" : p.status === "uncertain" ? "uncertain" : "pending"}">${esc(p.status)}</span>`;
   $("#ev-body").innerHTML = `${p.chip ? compareWidget(p.chip_pre, p.chip, "before", "after") : `<p class="empty">No photo.</p>`}
     <div><p class="reason">${esc(p.use)}</p>${l.reason ? `<p>“${esc(l.reason)}”</p>` : ""}
     <ul class="checks">${(p.checks || []).map((c) => `<li><span class="ck ${c.result}">${c.result === "pass" ? "✓" : c.result === "fail" ? "✕" : "?"}</span> ${esc(c.name)} <span class="m">${esc(c.detail || "")}</span></li>`).join("")}</ul></div>
