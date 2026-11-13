@@ -93,14 +93,17 @@ class Network:
                 if geoms[int(i)].contains(c):
                     members[int(i)].append(bid)
                     break
+        areas = {bid: reproject_geom(geom_of(res[bid]), WGS84, self.utm).area for bid in res}
         for i, bids in members.items():
             tp = tracts[i]["properties"]
             pop = tp.get("E_TOTPOP") or 0
             share = geoms[i].intersection(cov).area / geoms[i].area if geoms[i].area else 0
-            per = (pop * share / len(bids)) if bids and pop else ppb
-            per = min(per, 25.0)  # apartments are single footprints; cap so one block does not dominate
+            total_area = sum(areas[b] for b in bids) or 1.0
             fields = {k: tp.get(k) for k in ("GEOID", "RPL_THEMES", "EP_AGE65", "EP_NOVEH", "EP_DISABL", "EP_LIMENG", "EP_POV150")}
             for bid in bids:
+                # tract people inside the photos, shared by footprint area; capped at ~1 person per 25 m2 of footprint
+                per = pop * share * areas[bid] / total_area if pop else ppb
+                per = min(per, max(ppb, areas[bid] / 25))
                 out[bid] = {"est_pop": round(per, 2), "tract": fields}
         return out
 
