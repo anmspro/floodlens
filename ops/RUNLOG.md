@@ -43,3 +43,4 @@
 | 20261113T194738Z | label west_houston | ok | 540.5s | f5b6707 | RR191131IP01 |  |
 | 20261113T195639Z | fetch-context west_houston | ok | 28.0s | f5b6707 | RR191131IP01 |  |
 | 20261113T195707Z | analyze west_houston | ok | 4.8s | f5b6707 | RR191131IP01 |  |
+| 20261113T195819Z | evaluate bevil_oaks | ok | 32.9s | d01a6c4 | RR191131IP01 |  |

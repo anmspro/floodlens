@@ -1,0 +1,47 @@
+{
+ "bevil_oaks": {
+  "area": "bevil_oaks",
+  "labelled_by_model": 101,
+  "status_distribution": {
+   "uncertain": 5,
+   "blocked": 94,
+   "open": 2
+  },
+  "juror_agreement": {
+   "yes|water": 81,
+   "no|water": 13,
+   "no|mud_or_debris": 4,
+   "no|dry_pavement": 2,
+   "no|trees": 1
+  },
+  "controls": {
+   "n": 40,
+   "same_2016": {
+    "status_counts": {
+     "open": 38,
+     "blocked": 2
+    },
+    "pair_said_new_water": 0,
+    "same_status_as_real": 3
+   },
+   "shuffled": {
+    "status_counts": {
+     "blocked": 37,
+     "open": 1,
+     "uncertain": 2
+    },
+    "pair_said_new_water": 32,
+    "same_status_as_real": 40
+   },
+   "swapped": {
+    "status_counts": {
+     "blocked": 37,
+     "open": 1,
+     "uncertain": 2
+    },
+    "pair_said_new_water": 19,
+    "same_status_as_real": 40
+   }
+  }
+ }
+}

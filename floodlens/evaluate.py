@@ -207,6 +207,22 @@ def run(areas: list[Settings], n: int = 60, log=print) -> dict:
                 pairs = [(t, pred(byid[sid])) for sid, t in truth.items() if sid in byid and byid[sid].get("chip_url")]
                 rows[name] = confusion(pairs)
             r["vs_hand_labels"] = rows
+        # assistant visual spot check (kept apart from human labels)
+        ap = EVAL / "labels" / f"{s.area_id}_assistant.csv"
+        if ap.exists():
+            truth_a = {r["segment_id"]: r["label"] for r in csv.DictReader(open(ap)) if r["label"] in ("open", "blocked")}
+            fema = tile_fema(s)
+            rows = {}
+            for name, pred in (
+                ("FEMA zone rule (baseline)", lambda p: "blocked" if fema.get(p.get("tile_id") or "", "") == "T" else "open"),
+                ("Colour threshold (baseline)", lambda p: baseline_colour(s, p["id"])),
+                ("8B pair question only", lambda p: from_label(p.get("label"), "pair_only", th)),
+                ("8B photo question only", lambda p: from_label(p.get("label"), "photo_only", th)),
+                ("8B jury (shipped)", lambda p: from_label(p.get("label"), "jury", th)),
+            ):
+                rows[name] = confusion([(t_, pred(byid[sid])) for sid, t_ in truth_a.items() if sid in byid])
+            r["vs_assistant_spot_check"] = rows
+            r["assistant_spot_check_n"] = {"labelled": sum(1 for _ in csv.DictReader(open(ap))), "decided": len(truth_a)}
         # controls
         cands = [f for f in labelled if f["properties"].get("status_source") == "vlm"]
         random.Random(42).shuffle(cands)
@@ -235,6 +251,15 @@ def _md(r: dict) -> list[str]:
     if "inter_annotator" in r:
         ia = r["inter_annotator"]
         L += [f"Inter-annotator: {ia['reviewers']} agree on {ia['agreement']} of {ia['n_both']} roads (Cohen's kappa {ia['kappa']}).", ""]
+    if "vs_assistant_spot_check" in r:
+        n = r["assistant_spot_check_n"]
+        L += ["### Against a visual spot check by the AI assistant (not human labels)", "",
+              f"{n['labelled']} roads drawn at random (stratified by model status), shown without the model's answer; {n['decided']} were clear enough to label. "
+              "Treat this as a sanity check, not as ground truth.", "",
+              "| Method | n | Recall (flooded) | Precision (flooded) | Accuracy (decided) | Abstained |", "|---|---|---|---|---|---|"]
+        for k, v in r["vs_assistant_spot_check"].items():
+            L.append(f"| {k} | {v['n']} | {v['recall_flooded']} | {v['precision_flooded']} | {v['accuracy_decided']} | {v['abstention_rate']} |")
+        L.append("")
     if "vs_hand_labels" in r:
         L += ["### Against hand labels", "", "| Method | n | Recall (flooded) | Precision (flooded) | Accuracy (decided) | Abstained |", "|---|---|---|---|---|---|"]
         for k, v in r["vs_hand_labels"].items():
