@@ -30,6 +30,17 @@ def edge_statuses(segs: list[dict]) -> dict[str, str]:
     return out
 
 
+def _one_per_edge(blocked: dict) -> list[str]:
+    """Blocked pieces on a zone's edge, shortest road first, one piece per road edge."""
+    best: dict[str, dict] = {}
+    for f in blocked.values():
+        p = f["properties"]
+        if p["edge_id"] not in best:
+            best[p["edge_id"]] = {"id": p["id"], "len": 0.0}
+        best[p["edge_id"]]["len"] += p["length_m"]
+    return [v["id"] for v in sorted(best.values(), key=lambda v: v["len"])]
+
+
 class Network:
     """Loads graph + current labels once; recompute() after any label change."""
 
@@ -56,7 +67,15 @@ class Network:
         else persons_per_building. Tract population is shared over its residential buildings inside
         the photographed area, scaled by the share of the tract area that is photographed."""
         ppb = float(self.s.get("population.persons_per_building", 2.5))
-        res = {b["properties"]["id"]: b for b in self.buildings if b["properties"]["is_residential"]}
+        def homelike(b) -> bool:
+            p = b["properties"]
+            if not p["is_residential"]:
+                return False
+            if p.get("building") != "yes":
+                return True
+            # untagged "building=yes": count it as a home only if it is house-sized
+            return reproject_geom(geom_of(b), WGS84, self.utm).area < 400
+        res = {b["properties"]["id"]: b for b in self.buildings if homelike(b)}
         out = {bid: {"est_pop": ppb, "tract": None} for bid in res}
         p = self.s.derived / "context_tracts.geojson"
         if not p.exists():
@@ -189,7 +208,7 @@ class Network:
             zones.append({"geom": poly, "props": {
                 "label": label, "building_count": len(blds), "est_pop": round(est_pop, 1),
                 "vulnerability": vul, "care_facilities": care, "priority_score": round(priority, 1), "mode": mode,
-                "nearest_blocked_segment_ids": [k for k, _ in sorted(blocked.items(), key=lambda kv: kv[1]["properties"]["length_m"])],
+                "nearest_blocked_segment_ids": _one_per_edge(blocked),
                 "node_ids": sorted(int(n) for n in comp), "building_ids": [b["properties"]["id"] for b in blds],
                 "label_point": [round(poly.representative_point().x, 6), round(poly.representative_point().y, 6)],
             }})

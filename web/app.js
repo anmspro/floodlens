@@ -33,8 +33,8 @@ function baseStyle() {
   return { version: 8,
     sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, maxzoom: 19,
       attribution: "© OpenStreetMap contributors · Imagery NOAA NGS, USDA NAIP" } },
-    layers: [{ id: "bg", type: "background", paint: { "background-color": "#dfe5e8" } },
-             { id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.55 } }] };
+    layers: [{ id: "bg", type: "background", paint: { "background-color": "#d5dde2" } },
+             { id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.5, "raster-saturation": -0.35 } }] };
 }
 const map = new maplibregl.Map({ container: "map", style: baseStyle(), center: [-95.65, 29.8], zoom: 13, maxZoom: 20 });
 const before = new maplibregl.Map({ container: "map-before", style: baseStyle(), center: [-95.65, 29.8], zoom: 13, maxZoom: 20, attributionControl: false });
@@ -49,6 +49,16 @@ for (const m of [map, before]) m.on("error", (e) => {
 let syncing = false;
 function sync(a, b) { a.on("move", () => { if (syncing) return; syncing = true; b.jumpTo({ center: a.getCenter(), zoom: a.getZoom(), bearing: a.getBearing(), pitch: a.getPitch() }); syncing = false; }); }
 sync(map, before); sync(before, map);
+
+// panels float over the map, so frame things inside the visible gap between them
+function PAD() {
+  if (window.innerWidth <= 900) return { top: 150, left: 20, right: 20, bottom: Math.round(window.innerHeight * 0.45) };
+  const cs = getComputedStyle(document.documentElement);
+  const px = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
+  const gap = px("--gap");
+  const left = document.body.classList.contains("left-closed") ? 0 : px("--left-w");
+  return { top: px("--top-h") + 150, left: left + 3 * gap, right: px("--right-w") + 3 * gap + 50, bottom: 70 };
+}
 
 function bboxOf(geom) {
   let w = 180, s = 90, e = -180, n = -90;
@@ -85,7 +95,7 @@ async function loadArea(id) {
     if (!state.cfg.paired) setCompare(false);
     setImagery();
     const [w, s, e, n] = info.bbox;
-    map.fitBounds([[w, s], [e, n]], { padding: 24, duration: 0 });
+    map.fitBounds([[w, s], [e, n]], { padding: PAD(), duration: 0 });
     $("#evidence").classList.add("collapsed"); $("#ev-title").textContent = "Click a road, a neighbourhood, a site or a route to see the evidence";
     map.getSource("route").setData(empty()); map.getSource("naive").setData(empty());
     await refresh(true);
@@ -187,7 +197,7 @@ function renderKpis() {
   $("#kpis").innerHTML = `
     <button class="kpi alert" data-kpi="zones"><div class="v">~${fmt(s.people_cut_off?.[m])}</div><div class="l">people with no dry road out · ${fmt(nZ)} neighbourhoods</div></button>
     <button class="kpi" data-kpi="blocked"><div class="v">${fmt(seg.blocked)} <span class="m">of ${fmt(seen)}</span></div><div class="l">road pieces underwater</div></button>
-    <button class="kpi ${facs.length ? "alert" : ""}" data-kpi="facilities"><div class="v">${fmt(facs.length)}</div><div class="l">${facs.length ? esc(facs.slice(0, 2).join(", ")) : "facilities cut off"}</div></button>
+    <button class="kpi ${facs.length ? "alert" : ""}" data-kpi="facilities" title="${esc(facs.join(", "))}"><div class="v">${fmt(facs.length)}</div><div class="l">${facs.length ? `facilities cut off, incl. ${esc(facs[0])}` : "facilities cut off"}</div></button>
     <button class="kpi" data-kpi="impact"><div class="v">${dmg?.mid ? usd(dmg.mid) : "–"}</div><div class="l">${dmg?.mid ? `estimated home damage (${usd(dmg.low)} to ${usd(dmg.high)})` : "home damage not estimated yet"}</div></button>`;
 }
 
@@ -390,7 +400,7 @@ async function routeFrom(lngLat) {
     return;
   }
   map.getSource("route").setData(r.route);
-  map.fitBounds(bboxOf(r.route.geometry), { padding: 80, maxZoom: 17 });
+  map.fitBounds(bboxOf(r.route.geometry), { padding: PAD(), maxZoom: 17 });
   const nb = naive ? naive.properties.blocked_edge_ids.length : 0;
   $("#ev-title").textContent = `Safest way out: ${r.target.name} · ${fmt(r.length_m)} m`;
   $("#ev-body").innerHTML = `<div><div><span class="lg"><i></i>Safe route</span>${naive ? `<span class="lg"><i class="naive"></i>Usual shortest route</span>` : ""}</div>
@@ -402,7 +412,7 @@ async function routeFrom(lngLat) {
 
 function showZone(id) {
   const f = state.zones[state.mode].features.find((z) => z.properties.id === id); if (!f) return;
-  map.fitBounds(bboxOf(f.geometry), { padding: 80, maxZoom: 17 });
+  map.fitBounds(bboxOf(f.geometry), { padding: PAD(), maxZoom: 17 });
   const p = f.properties, v = p.vulnerability;
   $("#evidence").classList.remove("collapsed"); $("#ev-body").classList.add("one");
   $("#ev-title").innerHTML = `<span class="zmark" style="display:inline-grid;width:22px;height:22px;font-size:12px">${rankOf(p)}</span> ${esc(p.label)}`;
@@ -427,7 +437,7 @@ async function brief(zid, lang) {
 function showSite(id) {
   const f = state.sites?.features.find((x) => x.properties.id === id); if (!f) return;
   const p = f.properties, l = p.label || {};
-  map.fitBounds(bboxOf(f.geometry), { padding: 120, maxZoom: 18 });
+  map.fitBounds(bboxOf(f.geometry), { padding: PAD(), maxZoom: 18 });
   $("#evidence").classList.remove("collapsed"); $("#ev-body").classList.remove("one");
   $("#ev-title").innerHTML = `${esc(p.name || p.kind.replace("_", " "))} <span class="st ${p.status === "recommended" || p.status === "ok" ? "open" : p.status === "uncertain" ? "uncertain" : "pending"}">${esc(p.status)}</span>`;
   $("#ev-body").innerHTML = `${p.chip ? compareWidget(p.chip_pre, p.chip, "before", "after") : `<p class="empty">No photo.</p>`}
@@ -585,6 +595,13 @@ $("#routeBtn").addEventListener("click", () => {
 });
 $("#compareBtn").addEventListener("click", () => setCompare(!$("#mapwrap").classList.contains("comparing")));
 $("#ev-close").addEventListener("click", () => $("#evidence").classList.add("collapsed"));
+document.querySelector('[data-collapse="left"]').addEventListener("click", () => {
+  document.body.classList.add("left-closed"); document.querySelector('[data-reopen="left"]').classList.remove("hidden"); map.resize();
+});
+document.querySelector('[data-reopen="left"]').addEventListener("click", (e) => {
+  document.body.classList.remove("left-closed"); e.currentTarget.classList.add("hidden"); map.resize();
+});
+document.querySelector(".ev-head").addEventListener("click", (e) => { if (e.target.id !== "ev-close") $("#evidence").classList.remove("collapsed"); });
 $("#guideOk").addEventListener("click", () => { $("#guide").classList.add("hidden"); store.set("floodlens.guide", "1"); });
 $("#drillBtn").addEventListener("click", async () => {
   state.drill = !state.drill;

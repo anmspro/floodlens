@@ -91,7 +91,17 @@ def nfip_claims(s: Settings, log=print) -> list[dict]:
         while True:
             q = {"$filter": f"countyCode eq '{cc}' and dateOfLoss ge '{a}' and dateOfLoss le '{b}'",
                  "$select": fields, "$top": "10000", "$skip": str(skip)}
-            body = json.loads(_http(NFIP_URL + "?" + urllib.parse.urlencode(q), timeout=180, binary=False))
+            body = None
+            for attempt in range(4):
+                try:
+                    body = json.loads(_http(NFIP_URL + "?" + urllib.parse.urlencode(q), timeout=240, binary=False))
+                    break
+                except Exception as e:  # noqa: BLE001  OpenFEMA returns 503 under load
+                    log(f"[{s.area_id}] NFIP county {cc} page {skip // 10000}: {type(e).__name__}, retrying")
+                    import time as _t
+                    _t.sleep(15 * (attempt + 1))
+            if body is None:
+                raise RuntimeError(f"NFIP county {cc} failed after retries")
             rows = body.get("NfipClaims", [])
             claims += rows
             if len(rows) < 10000:
@@ -326,7 +336,7 @@ def run(s: Settings, n: int = SAMPLE, log=print) -> dict:
         if t:
             by_tract[t].append(r["damage_usd"])
     pairs = [(statistics.fmean(v) * res_per_tract[t], tract_claims.get(t, 0.0)) for t, v in by_tract.items() if len(v) >= 3]
-    rho = _spearman(pairs) if len(pairs) >= 4 else None
+    rho = _spearman(pairs) if (claims and len(pairs) >= 4) else None
     # farmland
     fields = _farmland(s, log)
     fchecked = asyncio.run(_check_fields(s, fields, log)) if fields else []

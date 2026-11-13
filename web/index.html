@@ -2,84 +2,81 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
   <title>FloodLens</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231e64c8'/%3E%3Cpath d='M6 19c3-2 5-2 8 0s5 2 8 0 4-2 5-1' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='12' r='4' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=5">
 </head>
 <body>
-  <header>
+  <!-- full-bleed map -->
+  <div id="mapwrap">
+    <div id="map-before" class="map" aria-hidden="true"></div>
+    <div id="map" class="map" role="application" aria-label="Flood map"></div>
+    <div id="swipe" class="swipe hidden" aria-hidden="true"><div class="handle" title="Drag to compare before and after"><span>Before</span><span>After</span></div></div>
+    <div id="hint" class="hint hidden" role="status"></div>
+    <div id="busy" class="busy hidden" role="status"><span class="spin"></span>Updating</div>
+  </div>
+
+  <!-- top bar -->
+  <header class="glass topbar">
     <div class="brand">
-      <span class="logo" aria-label="FloodLens">Flood<b>Lens</b></span>
-      <label class="areasel"><span class="sr">Area</span><select id="areaSel" aria-label="Choose area"></select></label>
-      <span id="event" class="event"></span>
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14"/><path d="M6 19c3-2 5-2 8 0s5 2 8 0 4-2 5-1"/><circle class="dot" cx="16" cy="12" r="4"/></svg></span>
+      <span class="logo">Flood<b>Lens</b></span>
     </div>
+    <label class="areasel"><span class="sr">Area</span><select id="areaSel" aria-label="Choose area"></select></label>
+    <span id="event" class="event"></span>
     <div id="pills" class="pills" aria-live="polite"></div>
   </header>
 
-  <main>
-    <aside id="left" class="panel" aria-label="Map layers and legend">
-      <h3>Show on map</h3>
-      <label><input type="checkbox" data-layer="roads" checked> Road status</label>
-      <label><input type="checkbox" data-layer="zones" checked> Cut-off neighbourhoods</label>
-      <label><input type="checkbox" data-layer="facilities" checked> Facilities</label>
-      <label><input type="checkbox" data-layer="relief" checked> Relief sites</label>
-      <label><input type="checkbox" data-layer="impact"> Homes checked for damage</label>
-      <label><input type="checkbox" data-layer="warnings"> NWS flood warnings (event)</label>
-      <label><input type="checkbox" data-layer="reports" checked> NOAA storm reports</label>
-      <label class="sa-only hidden"><input type="checkbox" data-layer="crossings" checked> Low-water crossings</label>
-      <label class="sa-only hidden"><input type="checkbox" data-layer="sensors" checked> SmartSA flood sensors</label>
-      <label><input type="checkbox" data-layer="buildings"> Buildings</label>
-      <label><input type="checkbox" data-layer="post" checked> Aerial photo (after)</label>
+  <!-- headline numbers -->
+  <section id="kpis" class="kpis" aria-live="polite"></section>
 
-      <h3>How sure</h3>
-      <div class="seg" role="group" aria-label="Zone mode">
-        <button data-mode="permissive" class="on" title="Roads the model could not see count as passable, with a penalty">Best estimate</button>
-        <button data-mode="strict" title="Only roads the model saw as open count as passable">Confirmed only</button>
-      </div>
-      <p class="note" id="modeNote"></p>
+  <!-- left: layers -->
+  <aside id="left" class="glass panel left" aria-label="Map layers and legend">
+    <button class="collapse" data-collapse="left" aria-label="Hide layers panel" title="Hide panel">‹</button>
+    <h3>Roads</h3>
+    <div id="legend" class="legend"></div>
+    <h3>How sure</h3>
+    <div class="seg" role="group" aria-label="Zone mode">
+      <button data-mode="permissive" class="on" title="Roads without a clear photo count as passable but cost more">Best estimate</button>
+      <button data-mode="strict" title="Only roads the model saw dry count as passable">Confirmed only</button>
+    </div>
+    <p class="note" id="modeNote"></p>
+    <h3>Show on map</h3>
+    <div class="toggles">
+      <label><input type="checkbox" data-layer="roads" checked><span>Road status</span></label>
+      <label><input type="checkbox" data-layer="zones" checked><span>Cut-off neighbourhoods</span></label>
+      <label><input type="checkbox" data-layer="relief" checked><span>Relief sites</span></label>
+      <label><input type="checkbox" data-layer="facilities" checked><span>Facilities</span></label>
+      <label><input type="checkbox" data-layer="reports" checked><span>NOAA storm reports</span></label>
+      <label class="sa-only hidden"><input type="checkbox" data-layer="crossings" checked><span>Low-water crossings</span></label>
+      <label class="sa-only hidden"><input type="checkbox" data-layer="sensors" checked><span>SmartSA flood sensors</span></label>
+      <label><input type="checkbox" data-layer="impact"><span>Homes checked for damage</span></label>
+      <label><input type="checkbox" data-layer="warnings"><span>NWS flood warnings</span></label>
+      <label><input type="checkbox" data-layer="buildings"><span>Buildings</span></label>
+      <label><input type="checkbox" data-layer="post" checked><span>Aerial photo</span></label>
+    </div>
+    <h3>Data sources</h3>
+    <div id="sources" class="sources"></div>
+    <button id="drillBtn" class="chip-btn" aria-pressed="false" title="Simulate losing the internet: every source falls back to its saved snapshot">Offline drill</button>
+    <p class="note">Each road is judged by <b id="model"></b> on a before and an after photo. Click any road for the evidence.</p>
+    <p class="note credits">Imagery NOAA NGS (CC0), USDA NAIP. Map data © OpenStreetMap contributors.</p>
+  </aside>
+  <button class="glass reopen hidden" data-reopen="left" aria-label="Show layers panel">Layers</button>
 
-      <h3>Roads</h3>
-      <div id="legend" class="legend"></div>
-      <p class="note">Each road is judged by <b id="model"></b>, comparing a 2016 photo with the 30 Aug 2017 photo. Click any road for the evidence.</p>
-      <h3>Data sources</h3>
-      <div id="sources" class="sources"></div>
-      <button id="drillBtn" class="tool small" title="Simulate losing the internet: every source falls back to its saved snapshot">Offline drill</button>
-      <p class="note credits">Imagery NOAA NGS (CC0), USDA NAIP. Roads and buildings © OpenStreetMap contributors (ODbL).</p>
-    </aside>
-
-    <section id="center">
-      <div id="kpis" class="kpis" aria-live="polite"></div>
-      <div id="mapwrap">
-        <div id="map-before" class="map" aria-hidden="true"></div>
-        <div id="map" class="map" role="application" aria-label="Flood map"></div>
-        <div id="swipe" class="swipe hidden" aria-hidden="true"><div class="handle" title="Drag to compare 2016 and 2017"><span>2016</span><span>2017</span></div></div>
-        <div class="maptools">
-          <button id="compareBtn" class="tool" aria-pressed="false" title="Swipe between the 2016 and 2017 photos">Compare 2016 ⇄ 2017</button>
-        </div>
-        <div id="hint" class="hint hidden" role="status"></div>
-        <div id="busy" class="busy hidden" role="status">Updating…</div>
-        <div id="guide" class="guide hidden" role="dialog" aria-labelledby="guideTitle">
-          <h2 id="guideTitle">Which streets became islands?</h2>
-          <ol>
-            <li><span class="sw blocked"></span><b>Red roads</b> were underwater on 30 Aug 2017. <span class="sw open"></span><b>Green</b> roads were dry.</li>
-            <li><span class="sw zone"></span><b>Shaded areas</b> are neighbourhoods with no dry road out. Number 1 needs help first.</li>
-            <li>Press <b>Route me out</b> and click a home to get the safest way out.</li>
-          </ol>
-          <button id="guideOk" class="primary">Show me the map</button>
-        </div>
-      </div>
-    </section>
-
-    <aside id="right" class="panel" aria-label="Actions">
-      <div class="tabs" role="tablist">
-        <button data-tab="zones" class="on" role="tab">Cut off</button>
-        <button data-tab="relief" role="tab">Relief</button>
-        <button data-tab="impact" role="tab">Impact</button>
-        <button data-tab="review" role="tab">Check <span id="nreview" class="badge"></span></button>
-      </div>
+  <!-- right: actions -->
+  <aside id="right" class="glass panel right" aria-label="Actions">
+    <div class="tabs" role="tablist">
+      <button data-tab="zones" class="on" role="tab">Cut off</button>
+      <button data-tab="relief" role="tab">Relief</button>
+      <button data-tab="impact" role="tab">Impact</button>
+      <button data-tab="review" role="tab">Check <span id="nreview" class="badge"></span></button>
+    </div>
+    <div class="tabbody">
       <div id="tab-zones">
-        <button id="routeBtn" class="primary">Route me out</button>
+        <button id="routeBtn" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19c3-6 6-2 8-8s5-6 6-6"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg>Route me out</button>
         <div class="seg small rank" role="group" aria-label="Rank neighbourhoods by">
           <button data-rank="priority" class="on">Rank by need</button><button data-rank="people">Rank by people</button>
         </div>
@@ -90,22 +87,42 @@
       <div id="tab-relief" class="hidden"><div id="relief"></div></div>
       <div id="tab-impact" class="hidden"><div id="impact"></div></div>
       <div id="tab-review" class="hidden">
-        <label class="who">Your name (for agreement stats) <input id="reviewer" maxlength="30" placeholder="e.g. Sam"></label>
-        <p class="note">Confirm or correct the model. Keys: <kbd>O</kbd> open, <kbd>B</kbd> blocked, <kbd>→</kbd> next.</p>
+        <label class="who">Your name, for agreement stats<input id="reviewer" maxlength="30" placeholder="e.g. Sam"></label>
+        <p class="note">Confirm or correct the model. Keys <kbd>O</kbd> open · <kbd>B</kbd> underwater · <kbd>→</kbd> next</p>
         <div class="seg small" role="group" aria-label="Review filter">
-          <button data-rf="blocked" class="on">Blocked</button><button data-rf="uncertain">Unsure</button><button data-rf="open">Open</button>
+          <button data-rf="blocked" class="on">Underwater</button><button data-rf="uncertain">Unsure</button><button data-rf="open">Open</button>
         </div>
         <div id="review"></div>
       </div>
-    </aside>
-  </main>
+    </div>
+  </aside>
 
-  <footer id="evidence" class="collapsed" aria-live="polite">
-    <div class="ev-head"><span id="ev-title">Click a road, a neighbourhood or a route to see the evidence</span><button id="ev-close" aria-label="Close evidence panel">×</button></div>
+  <!-- floating tools -->
+  <div class="maptools">
+    <button id="compareBtn" class="glass tool" aria-pressed="false" title="Swipe between the before and after photos">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M7 8l-4 4 4 4M17 8l4 4-4 4"/></svg>Compare before ⇄ after</button>
+  </div>
+
+  <!-- evidence sheet -->
+  <footer id="evidence" class="glass sheet collapsed" aria-live="polite">
+    <div class="ev-head"><span class="grab" aria-hidden="true"></span><span id="ev-title">Click a road, a neighbourhood, a site or a route to see the evidence</span><button id="ev-close" aria-label="Close evidence panel">×</button></div>
     <div id="ev-body"></div>
   </footer>
 
+  <!-- first visit -->
+  <div id="guide" class="guide-wrap hidden" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+    <div class="glass guide">
+      <h2 id="guideTitle">Which streets became islands?</h2>
+      <ol>
+        <li><span class="sw blocked"></span><span><b>Red dashed roads</b> were underwater when the photo was taken. <b>Green</b> roads were dry.</span></li>
+        <li><span class="sw zone"></span><span><b>Shaded areas</b> are neighbourhoods with no dry road out. Number 1 needs help first.</span></li>
+        <li><span class="sw route"></span><span>Press <b>Route me out</b> and click a home to get the safest way out.</span></li>
+      </ol>
+      <button id="guideOk" class="primary">Show me the map</button>
+    </div>
+  </div>
+
   <script src="/static/vendor/maplibre-gl.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

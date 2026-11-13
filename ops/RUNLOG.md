@@ -44,3 +44,11 @@
 | 20261113T195639Z | fetch-context west_houston | ok | 28.0s | f5b6707 | RR191131IP01 |  |
 | 20261113T195707Z | analyze west_houston | ok | 4.8s | f5b6707 | RR191131IP01 |  |
 | 20261113T195819Z | evaluate bevil_oaks | ok | 32.9s | d01a6c4 | RR191131IP01 |  |
+| 20261113T195713Z | impact west_houston | ok | 386.8s | d61b68e | RR191131IP01 |  |
+| 20261113T200340Z | relief west_houston | ok | 27.4s | d61b68e | RR191131IP01 |  |
+| 20261113T200408Z | prefetch-briefs west_houston | ok | 30.9s | d61b68e | RR191131IP01 |  |
+| 20261113T200515Z | impact west_houston | ok | 283.3s | d61b68e | RR191131IP01 |  |
+| 20261113T200959Z | relief west_houston | ok | 17.5s | d61b68e | RR191131IP01 |  |
+| 20261113T201017Z | relief bevil_oaks | ok | 3.0s | d61b68e | RR191131IP01 |  |
+| 20261113T201847Z | analyze west_houston | ok | 4.4s | d61b68e | RR191131IP01 |  |
+| 20261113T201852Z | analyze bevil_oaks | ok | 2.1s | d61b68e | RR191131IP01 |  |

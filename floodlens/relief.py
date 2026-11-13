@@ -25,7 +25,7 @@ TAGS = {"amenity": ["parking", "school", "college", "community_centre", "place_o
         "leisure": ["pitch", "park", "sports_centre", "recreation_ground", "playground"],
         "landuse": ["recreation_ground"]}
 FOOD_TAGS = {"shop": ["supermarket", "convenience", "grocery", "greengrocer", "general"]}
-MIN_M2, WALK_M, MAX_SITES, CAND_CAP = 1500, 1500, 5, 120
+MIN_M2, MAX_M2, WALK_M, MAX_SITES, CAND_CAP = 1500, 200_000, 1500, 5, 120
 
 
 def _kind(r) -> str:
@@ -49,8 +49,8 @@ def _candidates(s: Settings, log) -> list[dict]:
     out = []
     for _, r in g.iterrows():
         a = reproject_geom(r.geometry, WGS84, utm).area
-        if a < MIN_M2:
-            continue
+        if a < MIN_M2 or a > MAX_M2 or not cov.contains(r.geometry.representative_point()):
+            continue   # too small, a whole parkland/reservoir, or centred outside the photos
         name = r.get("name") if isinstance(r.get("name"), str) else None
         out.append({"type": "Feature", "geometry": r.geometry.__geo_interface__,
                     "properties": {"id": f"osm_{r.get('element', 'way')}_{r.get('id')}", "kind": _kind(r),
