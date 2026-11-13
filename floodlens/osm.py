@@ -295,3 +295,47 @@ def extra_features(s: Settings, log=print):
     g.to_file(snap, driver="GPKG")
     log(f"[{s.area_id}] OSM extras: {len(g)} features")
     return gpd.read_file(snap)
+
+
+SERVICE_TAGS = {
+    "amenity": ["hospital", "clinic", "doctors", "fire_station", "police"],
+    "emergency": ["ambulance_station"],
+    "healthcare": ["hospital", "urgent_care", "clinic"],
+}
+SERVICE_KIND = [("hospital", "Hospital"), ("urgent_care", "Urgent care"), ("clinic", "Clinic"), ("doctors", "Clinic"),
+                ("fire_station", "Fire station"), ("police", "Police"), ("ambulance_station", "Ambulance (EMS)")]
+
+
+def emergency_services(s: Settings, radius_m: float = 5000, log=print) -> list[dict]:
+    """Hospitals, urgent care, clinics, fire, police and EMS within radius of the area (one cached query)."""
+    import geopandas as gpd
+    snap = snapshot_dir(s) / "services.gpkg"
+    if snap.exists():
+        g = gpd.read_file(snap)
+    else:
+        _osmnx_settings(s)
+        try:
+            g = with_overpass_retry(ox.features_from_polygon, coverage(s, radius_m), tags=SERVICE_TAGS, log=log).reset_index()
+        except Exception as e:  # noqa: BLE001
+            if "No matching features" in str(e) or type(e).__name__ == "InsufficientResponseError":
+                g = gpd.GeoDataFrame(columns=["element", "id", "geometry"], geometry="geometry", crs=WGS84)
+            else:
+                raise
+        keep = [c for c in ("element", "id", "geometry", "name", "amenity", "emergency", "healthcare", "addr:street") if c in g.columns]
+        g = g[keep]
+        for c in keep:
+            if c != "geometry":
+                g[c] = g[c].astype(str).where(g[c].notna(), None)
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        g.to_file(snap, driver="GPKG")
+        log(f"[{s.area_id}] emergency services within {radius_m / 1000:.0f} km: {len(g)}")
+    out = []
+    for _, r in g.iterrows():
+        tags = {r.get("amenity"), r.get("emergency"), r.get("healthcare")}
+        kind = next((label for key, label in SERVICE_KIND if key in tags), None)
+        if not kind:
+            continue
+        p = r.geometry.representative_point()
+        out.append({"id": f"{r.get('element')}/{r.get('id')}", "name": r.get("name") if r.get("name") not in (None, "None") else kind,
+                    "kind": kind, "lon": round(p.x, 6), "lat": round(p.y, 6)})
+    return out

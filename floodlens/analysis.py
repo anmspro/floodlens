@@ -307,10 +307,45 @@ class Network:
                 uncertain.append(ed["eid"])
         tgt = targets[path[-1]]
         naive = self._naive(best, path[-1])
+        services = self._services_near(LineString(coords), lon, lat, D, best)
         text = [f"{'Start on' if i == 0 else 'Continue on'} {st['name']} for {round(st['m'])} m" for i, st in enumerate(steps)]
         text.append(f"Arrive: {tgt['name']} ({tgt['kind']})")
         return {"route": {"type": "Feature", "geometry": {"type": "LineString", "coordinates": coords}, "properties": {}},
-                "target": tgt, "length_m": round(length), "uncertain_edge_ids": uncertain, "steps": text, "mode": mode, "naive": naive}
+                "target": tgt, "length_m": round(length), "uncertain_edge_ids": uncertain, "steps": text, "mode": mode, "naive": naive, "services": services}
+
+    def _services_near(self, route_wgs, lon: float, lat: float, D, start: int, limit: int = 12) -> list[dict]:
+        """Emergency services near a safe route: distance off the route, straight-line distance from the start,
+        and road distance over passable roads when the service is inside the mapped network."""
+        import numpy as np
+        from floodlens.osm import emergency_services
+        try:
+            svcs = emergency_services(self.s)
+        except Exception:  # noqa: BLE001
+            return []
+        if not svcs:
+            return []
+        line = reproject_geom(route_wgs, WGS84, self.utm)
+        sx, sy = self.to_utm.transform(lon, lat)
+        ids = list(self.G.nodes)
+        xy = np.array([self.to_utm.transform(self.G.nodes[n]["x"], self.G.nodes[n]["y"]) for n in ids])
+        L = nx.DiGraph()
+        for u, v, d in D.edges(data=True):
+            L.add_edge(u, v, len=float(self.G.get_edge_data(u, v)[d["key"]].get("length", 1.0)))
+        reach = nx.single_source_dijkstra_path_length(L, start, weight="len") if start in L else {}
+        cov = None
+        out = []
+        for sv in svcs:
+            px, py = self.to_utm.transform(sv["lon"], sv["lat"])
+            p = Point(px, py)
+            dn = ((xy[:, 0] - px) ** 2 + (xy[:, 1] - py) ** 2)
+            k = int(dn.argmin())
+            near_node, gap = ids[k], float(dn[k] ** 0.5)
+            road = reach.get(near_node)
+            out.append({**sv, "off_route_m": round(line.distance(p)), "from_start_m": round(((px - sx) ** 2 + (py - sy) ** 2) ** 0.5),
+                        "by_safe_road_m": round(road + gap) if (road is not None and gap < 300) else None,
+                        "inside_map": gap < 300})
+        out.sort(key=lambda r: (r["off_route_m"], r["from_start_m"]))
+        return out[:limit]
 
     def _naive(self, start: int, target: int) -> dict | None:
         """Shortest route to the same destination ignoring the flood: what a normal map app would suggest."""

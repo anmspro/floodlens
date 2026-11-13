@@ -32,7 +32,7 @@ def area(area_id: str):
     if area_id not in BASE.area_ids:
         raise HTTPException(404, f"unknown area {area_id}")
     s = BASE.for_area(area_id)
-    if not (s.derived / "road_segments.geojson").exists():
+    if not (s.derived / "area.json").exists():
         raise HTTPException(409, f"area {area_id} is not processed yet")
     return s
 
@@ -61,7 +61,8 @@ def areas():
         s = BASE.for_area(a)
         info_p, sum_p = s.derived / "area.json", s.derived / "summary.json"
         info = json.loads(info_p.read_text()) if info_p.exists() else {"id": a, "name": s.area["name"]}
-        info["ready"] = (s.derived / "road_segments.geojson").exists() and sum_p.exists()
+        info["ready"] = info_p.exists()
+        info["partial"] = not ((s.derived / "summary.json").exists() and (s.derived / "road_segments.geojson").exists())
         info["summary"] = json.loads(sum_p.read_text()) if sum_p.exists() else None
         out.append(info)
     return {"default": BASE.raw.get("default_area"), "areas": out}
@@ -90,9 +91,12 @@ def layer(area_id: str, name: str):
 def summary(area_id: str):
     s = area(area_id)
     p = s.derived / "summary.json"
-    if not p.exists():
+    if not p.exists() and (s.derived / "graph.graphml").exists() and (s.derived / "road_segments.geojson").exists():
         with LOCK:
             net(s).run()
+    if not p.exists():
+        return {"segments": {}, "people_cut_off": {"strict": None, "permissive": None}, "facilities_cut_off": [],
+                "unverified": {}, "partial": True}
     return json.loads(p.read_text())
 
 
@@ -121,9 +125,39 @@ def area_context(area_id: str):
     return out
 
 
+@app.get("/api/{area_id}/services")
+def services(area_id: str):
+    """Emergency services in and around the area, with reachability from outside over passable roads."""
+    import networkx as nx
+    import numpy as np
+    from floodlens.osm import emergency_services
+    s = area(area_id)
+    if not (s.derived / "graph.graphml").exists():
+        return []
+    n = net(s)
+    svcs = emergency_services(s)
+    H = n.undirected("permissive")
+    comp = {x: i for i, c in enumerate(nx.connected_components(H)) for x in c}
+    exits = {comp[e] for e in n.exit_nodes if e in comp}
+    ids = list(n.G.nodes)
+    xy = np.array([n.to_utm.transform(n.G.nodes[i]["x"], n.G.nodes[i]["y"]) for i in ids])
+    out = []
+    for sv in svcs:
+        px, py = n.to_utm.transform(sv["lon"], sv["lat"])
+        d = (xy[:, 0] - px) ** 2 + (xy[:, 1] - py) ** 2
+        k = int(d.argmin())
+        inside = float(d[k] ** 0.5) < 300
+        status = ("reachable" if comp.get(ids[k]) in exits else "cut off") if inside else "outside the photos"
+        out.append({**sv, "status": status})
+    order = {"cut off": 0, "reachable": 1, "outside the photos": 2}
+    return sorted(out, key=lambda r: (order[r["status"]], r["kind"], r["name"]))
+
+
 @app.get("/api/{area_id}/review")
 def review_queue(area_id: str, status: str = "uncertain", limit: int = 100):
     s = area(area_id)
+    if not (s.derived / "road_segments.geojson").exists():
+        return []
     segs = [f["properties"] for f in read_geojson(s.derived / "road_segments.geojson")
             if f["properties"]["status"] == status and f["properties"].get("chip_url")
             and f["properties"]["status_source"] != "human"]

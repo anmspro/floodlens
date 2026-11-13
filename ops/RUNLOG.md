@@ -60,3 +60,9 @@
 | 20261113T202608Z | impact west_houston | ok | 369.8s | 263cb90 | RR191131IP01 |  |
 | 20261113T195610Z | prepare richmond | ok | 2196.3s | 263cb90 | RR191131IP01 |  |
 | 20261113T203247Z | chips richmond | ok | 4.4s | 263cb90 | RR191131IP01 |  |
+| 20261113T203251Z | fetch-data simonton | ok | 8.7s | 8eb1366 | RR191131IP01 |  |
+| 20261113T203300Z | imagery simonton | ok | 10.9s | 8eb1366 | RR191131IP01 |  |
+| 20261113T204328Z | analyze kingwood | ok | 3.1s | 8eb1366 | RR191131IP01 |  |
+| 20261113T204345Z | fetch-data simonton | ok | 0.7s | 8eb1366 | RR191131IP01 |  |
+| 20261113T204346Z | imagery simonton | ok | 1.5s | 8eb1366 | RR191131IP01 |  |
+| 20261113T204347Z | fetch-data hill_country | ok | 9.4s | 8eb1366 | RR191131IP01 |  |

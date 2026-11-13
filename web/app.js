@@ -77,7 +77,7 @@ async function boot() {
   const a = await api("/api/areas");
   state.areas = a.areas;
   const ready = a.areas.filter((x) => x.ready);
-  $("#areaSel").innerHTML = a.areas.map((x) => `<option value="${esc(x.id)}" ${x.ready ? "" : "disabled"}>${esc(x.name)}${x.ready ? "" : " (processing…)"}</option>`).join("");
+  $("#areaSel").innerHTML = a.areas.map((x) => `<option value="${esc(x.id)}" ${x.ready ? "" : "disabled"}>${esc(x.name)}${!x.ready ? " (not started)" : x.partial ? " (processing, partial)" : ""}</option>`).join("");
   const fromHash = location.hash.slice(1);
   const pick = ready.find((x) => x.id === fromHash) || ready.find((x) => x.id === a.default) || ready[0];
   if (!pick) { $("#ev-title").textContent = "No area is processed yet. Run the pipeline first."; return; }
@@ -93,7 +93,7 @@ async function loadArea(id) {
     state.area = id; location.hash = id; $("#areaSel").value = id;
     state.cfg = await api(A("/config"));
     const info = state.cfg.area;
-    $("#event").textContent = `${info.event} · aerial photos ${info.after_dates.join(", ")}`;
+    $("#event").textContent = `${info.event}${info.after_dates.length ? ` · aerial photos ${info.after_dates.join(", ")}` : ""}`;
     $("#model").textContent = state.cfg.model;
     $("#modeNote").textContent = MODE_NOTE[state.mode];
     $("#compareBtn").classList.toggle("hidden", !state.cfg.paired);
@@ -200,6 +200,7 @@ function renderKpis() {
   const facs = s.facilities_cut_off || [];
   const dmg = state.impact?.homes?.est_building_damage_usd;
   $("#kpis").innerHTML = `
+    ${s.partial ? `<button class="kpi"><div class="v">…</div><div class="l">still processing: photos shown, results soon</div></button>` : ""}
     <button class="kpi alert" data-kpi="zones"><div class="v">~${fmt(s.people_cut_off?.[m])}</div><div class="l">people with no dry road out · ${fmt(nZ)} neighbourhoods</div></button>
     <button class="kpi" data-kpi="blocked"><div class="v">${fmt(seg.blocked)} <span class="m">of ${fmt(seen)}</span></div><div class="l">road pieces underwater</div></button>
     <button class="kpi ${facs.length ? "alert" : ""}" data-kpi="facilities" title="${esc(facs.join(", "))}"><div class="v">${fmt(facs.length)}</div><div class="l">${facs.length ? `facilities cut off, incl. ${esc(facs[0])}` : "facilities cut off"}</div></button>
