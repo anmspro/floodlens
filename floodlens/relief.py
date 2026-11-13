@@ -160,7 +160,7 @@ def run(s: Settings, log=print) -> dict:
         checks_list = [
             ("Photo check", "pass" if lab.get("usable") == "usable" else "fail" if lab.get("usable") == "not_usable" else "warn",
              lab.get("reason") or ("no photo" if not c else "")),
-            ("Next to a road", "pass" if d_road <= 40 else "fail", f"{round(d_road)} m from the nearest road"),
+            ("Next to a road", "pass" if d_road <= 100 else "fail", f"{round(d_road)} m from the nearest road"),
             ("Truck access over confirmed-dry roads", "pass" if comp.get(node) in exit_comps else "warn" if node in W else "fail",
              "reachable from outside" if comp.get(node) in exit_comps else "only over roads the model could not confirm"),
             ("Not lower than surroundings", ("fail" if rel["relative_m"] < -0.5 else "pass") if rel else "warn",
