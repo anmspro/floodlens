@@ -40,6 +40,12 @@ const map = new maplibregl.Map({ container: "map", style: baseStyle(), center: [
 const before = new maplibregl.Map({ container: "map-before", style: baseStyle(), center: [-95.65, 29.8], zoom: 13, maxZoom: 20, attributionControl: false });
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+// Street basemap is the only map layer that needs the internet. If it fails, hide it quietly:
+// the aerial photo tiles and every data layer are served from this machine.
+let basemapFailed = 0;
+for (const m of [map, before]) m.on("error", (e) => {
+  if (e.sourceId === "osm" && ++basemapFailed >= 3 && m.getLayer("osm")) { m.setLayoutProperty("osm", "visibility", "none"); }
+});
 let syncing = false;
 function sync(a, b) { a.on("move", () => { if (syncing) return; syncing = true; b.jumpTo({ center: a.getCenter(), zoom: a.getZoom(), bearing: a.getBearing(), pitch: a.getPitch() }); syncing = false; }); }
 sync(map, before); sync(before, map);
@@ -392,8 +398,8 @@ function showZone(id) {
 async function brief(zid, lang) {
   $("#briefOut").innerHTML = `<p class="m">The model is writing a draft…</p>`;
   try {
-    const b = await post(A("/brief"), { zone_id: zid, mode: state.mode, lang });
-    $("#briefOut").innerHTML = `<div class="brief"><div class="m">${esc(b.label)} · ${esc(b.model)}</div><p>${b.brief_html}</p>
+    const b = await post(A("/brief"), { zone_id: zid, mode: state.mode, lang, prefer_cache: state.drill });
+    $("#briefOut").innerHTML = `<div class="brief"><div class="m">${esc(b.label)} · ${esc(b.model)}${b.from_cache ? " · <b>saved copy</b> (model not reached)" : ""}</div><p>${b.brief_html}</p>
       <div class="alert">${b.alert_html}</div><div class="m">${b.alert_chars} characters${b.unverified_numbers.length ? ` · <span style="color:var(--blocked)">${b.unverified_numbers.length} number(s) not found in the data are struck through</span>` : " · every number checked against the data"}</div></div>`;
   } catch (e) { $("#briefOut").innerHTML = `<p class="m">Could not reach the model: ${esc(e.message)}</p>`; }
 }

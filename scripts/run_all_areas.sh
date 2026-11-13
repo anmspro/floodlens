@@ -16,5 +16,7 @@ for a in $AREAS; do
   $PY -m floodlens analyze --area $a || echo "!!! $a analyze failed"
   $PY -m floodlens impact --area $a || echo "!!! $a impact failed"
   $PY -m floodlens relief --area $a || echo "!!! $a relief failed"
+  $PY -m floodlens prefetch-briefs --area $a || echo "!!! $a briefs failed"
 done
+$PY -m floodlens offline-check --area all
 echo "=== done ($(date +%H:%M:%S))"

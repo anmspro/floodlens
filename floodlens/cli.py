@@ -197,6 +197,49 @@ def relief(area: str = AREA):
         rl.run(s)
 
 
+@app.command("prefetch-briefs")
+@logged
+def prefetch_briefs(area: str = AREA, top: int = 5):
+    """Write and save dispatch briefs (English + Spanish) for the top cut-off zones, for offline demos."""
+    from floodlens import brief as b
+    from floodlens.geo import read_geojson
+    for s in areas(area):
+        for mode in ("permissive", "strict"):
+            zones = read_geojson(s.derived / f"cutoff_zones_{mode}.geojson")[:top]
+            for z in zones:
+                for lang in ("en", "es"):
+                    out = b.make_brief(s, z["properties"]["id"], mode, lang)
+                    print(s.area_id, mode, z["properties"]["id"], lang, "ok" if not out.get("from_cache") else "cached")
+
+
+@app.command("offline-check")
+@logged
+def offline_check(area: str = AREA):
+    """Confirm every file the demo needs is on disk (run before judging, then try the app with Wi-Fi off)."""
+    need = ["area.json", "tiles.csv", "web_tiles.json", "graph.graphml", "exits.json", "road_segments.geojson",
+            "road_edges.geojson", "buildings.geojson", "facilities.geojson", "cutoff_zones_permissive.geojson",
+            "cutoff_zones_strict.geojson", "summary.json", "impact.json", "impact_buildings.geojson",
+            "relief.json", "relief_sites.geojson", "context_tracts.geojson", "context_warnings.geojson"]
+    ok_all = True
+    for s in areas(area):
+        missing = [f for f in need if not (s.derived / f).exists()]
+        segs = (s.derived / "road_segments.geojson")
+        n_chips = len(list((s.chips / "roads").glob("*_post.jpg"))) if (s.chips / "roads").exists() else 0
+        n_tiles = sum(1 for _ in s.tiles.rglob("*.webp")) if s.tiles.exists() else 0
+        briefs = len(list((s.derived / "briefs").glob("*.json"))) if (s.derived / "briefs").exists() else 0
+        snaps = [p.name for p in (s.snapshots / s.area_id / "context").glob("*")] if (s.snapshots / s.area_id / "context").exists() else []
+        pending = 0
+        if segs.exists():
+            import json as _j
+            pending = sum(1 for f in _j.loads(segs.read_text())["features"] if f["properties"]["status"] == "pending")
+        ok = not missing and n_tiles > 0 and pending == 0
+        ok_all &= ok
+        print(f"[{'OK ' if ok else 'GAP'}] {s.area_id}: map tiles {n_tiles}, road crops {n_chips}, saved briefs {briefs}, "
+              f"unlabelled roads {pending}, context snapshots {len(snaps)}" + (f"\n      missing: {', '.join(missing)}" if missing else ""))
+    if not ok_all:
+        raise SystemExit("some areas are not demo-ready (see GAP lines)")
+
+
 @app.command()
 @logged
 def serve(port: int = 8501, host: str = "127.0.0.1"):

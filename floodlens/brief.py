@@ -35,7 +35,17 @@ def _facts(s: Settings, zone_id: str | None, mode: str) -> dict:
             sp = segs.get(sid, {})
             blocked.append({"id": sid, "road": sp.get("name") or "unnamed road", "length_m": sp.get("length_m"),
                             "evidence": (sp.get("label") or {}).get("reason"), "photo_tile": sp.get("tile_id")})
-        facts["zone"] = {"id": p["id"], "rank": p["priority_rank"], "near": p["label"], "people": round(p["est_pop"]),
+        svi = (p.get("vulnerability") or {}).get("RPL_THEMES")
+        reasons = []
+        if p.get("people_rank") == 1:
+            reasons.append("it has the most people of any cut-off neighbourhood")
+        if svi is not None and svi >= 0.75:
+            reasons.append(f"its census tract is highly vulnerable (SVI percentile {round(svi * 100)})")
+        if p.get("care_facilities"):
+            reasons.append("a care facility is inside it")
+        if not reasons:
+            reasons.append(f"people times vulnerability puts it at rank {p['priority_rank']}")
+        facts["zone"] = {"id": p["id"], "rank": p["priority_rank"], "rank_reason": "; ".join(reasons), "near": p["label"], "people": round(p["est_pop"]),
                          "buildings": p["building_count"], "vulnerability": p.get("vulnerability"),
                          "blocked_roads_shortest_first": blocked}
     return facts
@@ -44,7 +54,7 @@ def _facts(s: Settings, zone_id: str | None, mode: str) -> dict:
 PROMPT = """You write for a flood dispatcher. Use ONLY the facts in the JSON below. Do not add any number, place, time or claim that is not in it.
 Write in {lang}.
 
-Part 1, "BRIEF": at most 90 words. Say which neighbourhood is cut off, roughly how many people, why it ranks where it does, and which flooded road to clear or avoid first. Put the id of each road you mention in square brackets, like [id].
+Part 1, "BRIEF": at most 90 words. Say which neighbourhood is cut off, roughly how many people, why it ranks where it does (use rank_reason exactly, do not invent another reason), and which flooded road to clear or avoid first. Always write the road's name, then its id in square brackets, like "Davida Drive [123_456_0_0]".
 Part 2, "ALERT": a text message for residents of that neighbourhood, at most 300 characters, plain words, no emoji. Tell them to stay put and call for rescue if they cannot leave safely, and end with "Turn around, don't drown." (translated if not English).
 
 Return JSON only: {{"brief": "...", "alert": "..."}}
@@ -88,12 +98,32 @@ def check_numbers(text: str, allowed: set[str]) -> tuple[str, list[str]]:
     return safe, bad
 
 
-def make_brief(s: Settings, zone_id: str | None, mode: str = "permissive", lang: str = "en") -> dict:
+def _cache_path(s: Settings, zone_id: str | None, mode: str, lang: str):
+    return s.derived / "briefs" / f"{mode}_{zone_id or 'top'}_{lang}.json"
+
+
+def make_brief(s: Settings, zone_id: str | None, mode: str = "permissive", lang: str = "en", prefer_cache: bool = False) -> dict:
+    """Live model call; on any failure (or prefer_cache) return the saved brief for this zone if one exists."""
+    cp = _cache_path(s, zone_id, mode, lang)
+    if prefer_cache and cp.exists():
+        return {**json.loads(cp.read_text()), "from_cache": True}
+    try:
+        out = _make_brief_live(s, zone_id, mode, lang)
+    except Exception as e:  # noqa: BLE001  model server down, network gone...
+        if cp.exists():
+            return {**json.loads(cp.read_text()), "from_cache": True, "live_error": f"{type(e).__name__}"}
+        raise
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    cp.write_text(json.dumps(out))
+    return {**out, "from_cache": False}
+
+
+def _make_brief_live(s: Settings, zone_id: str | None, mode: str, lang: str) -> dict:
     facts = _facts(s, zone_id, mode)
     if s.vlm_mock:
         out = {"brief": f"MOCK brief for {facts.get('zone', {}).get('near', 'area')}.", "alert": "MOCK alert. Turn around, don't drown."}
     else:
-        client = OpenAI(base_url=s.vlm_base_url, api_key=s.vlm_api_key, timeout=s.vlm_timeout_s)
+        client = OpenAI(base_url=s.vlm_base_url, api_key=s.vlm_api_key, timeout=20, max_retries=1)
         r = client.chat.completions.create(
             model=s.vlm_model, temperature=0.2, max_tokens=500,
             messages=[{"role": "system", "content": "You are careful and concise. You never invent facts."},

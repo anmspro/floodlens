@@ -201,13 +201,17 @@ class BriefBody(BaseModel):
     zone_id: str | None = None
     mode: Literal["strict", "permissive"] = "permissive"
     lang: Literal["en", "es"] = "en"
+    prefer_cache: bool = False
 
 
 @app.post("/api/{area_id}/brief")
 def brief(area_id: str, body: BriefBody):
     s = area(area_id)
     from floodlens import brief as b
-    return b.make_brief(s, body.zone_id, body.mode, body.lang)
+    try:
+        return b.make_brief(s, body.zone_id, body.mode, body.lang, prefer_cache=body.prefer_cache)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"model unreachable and no saved brief for this zone ({type(e).__name__})")
 
 
 @app.get("/api/{area_id}/sources")
