@@ -11,6 +11,7 @@
   <header>
     <div class="brand">
       <span class="logo" aria-label="FloodLens">Flood<b>Lens</b></span>
+      <label class="areasel"><span class="sr">Area</span><select id="areaSel" aria-label="Choose area"></select></label>
       <span id="event" class="event"></span>
     </div>
     <div id="pills" class="pills" aria-live="polite"></div>
@@ -22,8 +23,11 @@
       <label><input type="checkbox" data-layer="roads" checked> Road status</label>
       <label><input type="checkbox" data-layer="zones" checked> Cut-off neighbourhoods</label>
       <label><input type="checkbox" data-layer="facilities" checked> Facilities</label>
+      <label><input type="checkbox" data-layer="relief" checked> Relief sites</label>
+      <label><input type="checkbox" data-layer="impact"> Homes checked for damage</label>
+      <label><input type="checkbox" data-layer="warnings"> NWS flood warnings (event)</label>
       <label><input type="checkbox" data-layer="buildings"> Buildings</label>
-      <label><input type="checkbox" data-layer="post" checked> Aerial photo (30 Aug 2017)</label>
+      <label><input type="checkbox" data-layer="post" checked> Aerial photo (after)</label>
 
       <h3>How sure</h3>
       <div class="seg" role="group" aria-label="Zone mode">
@@ -35,6 +39,9 @@
       <h3>Roads</h3>
       <div id="legend" class="legend"></div>
       <p class="note">Each road is judged by <b id="model"></b>, comparing a 2016 photo with the 30 Aug 2017 photo. Click any road for the evidence.</p>
+      <h3>Data sources</h3>
+      <div id="sources" class="sources"></div>
+      <button id="drillBtn" class="tool small" title="Simulate losing the internet: every source falls back to its saved snapshot">Offline drill</button>
       <p class="note credits">Imagery NOAA NGS (CC0), USDA NAIP. Roads and buildings © OpenStreetMap contributors (ODbL).</p>
     </aside>
 
@@ -64,15 +71,23 @@
     <aside id="right" class="panel" aria-label="Actions">
       <div class="tabs" role="tablist">
         <button data-tab="zones" class="on" role="tab">Cut off</button>
-        <button data-tab="review" role="tab">Check roads <span id="nreview" class="badge"></span></button>
+        <button data-tab="relief" role="tab">Relief</button>
+        <button data-tab="impact" role="tab">Impact</button>
+        <button data-tab="review" role="tab">Check <span id="nreview" class="badge"></span></button>
       </div>
       <div id="tab-zones">
         <button id="routeBtn" class="primary">Route me out</button>
+        <div class="seg small rank" role="group" aria-label="Rank neighbourhoods by">
+          <button data-rank="priority" class="on">Rank by need</button><button data-rank="people">Rank by people</button>
+        </div>
         <div id="zones"></div>
         <h4>Facilities</h4>
         <div id="facilities"></div>
       </div>
+      <div id="tab-relief" class="hidden"><div id="relief"></div></div>
+      <div id="tab-impact" class="hidden"><div id="impact"></div></div>
       <div id="tab-review" class="hidden">
+        <label class="who">Your name (for agreement stats) <input id="reviewer" maxlength="30" placeholder="e.g. Sam"></label>
         <p class="note">Confirm or correct the model. Keys: <kbd>O</kbd> open, <kbd>B</kbd> blocked, <kbd>→</kbd> next.</p>
         <div class="seg small" role="group" aria-label="Review filter">
           <button data-rf="blocked" class="on">Blocked</button><button data-rf="uncertain">Unsure</button><button data-rf="open">Open</button>

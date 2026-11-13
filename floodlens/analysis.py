@@ -12,7 +12,7 @@ from floodlens.config import Settings
 from floodlens.geo import WGS84, feature, geom_of, read_geojson, reproject_geom, utm_crs_for, write_geojson, transformer
 from floodlens.osm import edge_id
 
-UNSURE = {"uncertain", "pending", "no_imagery"}
+UNSURE = {"uncertain", "pending", "no_imagery", "outside"}
 
 
 def edge_statuses(segs: list[dict]) -> dict[str, str]:
@@ -48,24 +48,54 @@ class Network:
         self.buildings = read_geojson(s.derived / "buildings.geojson")
         self.facilities = read_geojson(s.derived / "facilities.geojson")
         self.exit_nodes = self._exit_nodes()
+        if not hasattr(self, "bpop"):
+            self.bpop = self._population()
+
+    def _population(self) -> dict[str, dict]:
+        """Per residential building: est_pop and tract vulnerability (SVI) when tracts were fetched,
+        else persons_per_building. Tract population is shared over its residential buildings inside
+        the photographed area, scaled by the share of the tract area that is photographed."""
+        ppb = float(self.s.get("population.persons_per_building", 2.5))
+        res = {b["properties"]["id"]: b for b in self.buildings if b["properties"]["is_residential"]}
+        out = {bid: {"est_pop": ppb, "tract": None} for bid in res}
+        p = self.s.derived / "context_tracts.geojson"
+        if not p.exists():
+            return out
+        from shapely.strtree import STRtree
+        from floodlens.osm import coverage
+        cov = reproject_geom(coverage(self.s), WGS84, self.utm)
+        tracts = read_geojson(p)
+        geoms = [reproject_geom(geom_of(t), WGS84, self.utm) for t in tracts]
+        tree = STRtree(geoms)
+        members: dict[int, list[str]] = defaultdict(list)
+        for bid, b in res.items():
+            c = reproject_geom(geom_of(b), WGS84, self.utm).centroid
+            for i in tree.query(c):
+                if geoms[int(i)].contains(c):
+                    members[int(i)].append(bid)
+                    break
+        for i, bids in members.items():
+            tp = tracts[i]["properties"]
+            pop = tp.get("E_TOTPOP") or 0
+            share = geoms[i].intersection(cov).area / geoms[i].area if geoms[i].area else 0
+            per = (pop * share / len(bids)) if bids and pop else ppb
+            per = min(per, 25.0)  # apartments are single footprints; cap so one block does not dominate
+            fields = {k: tp.get(k) for k in ("GEOID", "RPL_THEMES", "EP_AGE65", "EP_NOVEH", "EP_DISABL", "EP_LIMENG", "EP_POV150")}
+            for bid in bids:
+                out[bid] = {"est_pop": round(per, 2), "tract": fields}
+        return out
 
     def _exit_nodes(self) -> set[int]:
-        w, so, e, n = self.s.bbox
-        buf = float(self.s.get("routing.exit_buffer_m", 50))
-        x0, y0 = self.to_utm.transform(w, so)
-        x1, y1 = self.to_utm.transform(e, n)
-        out = set()
-        for nid, d in self.G.nodes(data=True):
-            x, y = self.to_utm.transform(d["x"], d["y"])
-            if min(x - x0, x1 - x, y - y0, y1 - y) <= buf:
-                out.add(nid)
-        return out
+        """Nodes where a road leaves the photographed area (written by `prepare`)."""
+        import json
+        p = self.s.derived / "exits.json"
+        return {int(n) for n in json.loads(p.read_text())} & set(self.G.nodes) if p.exists() else set()
 
     def target_nodes(self, kinds=("hospital", "shelter", "exit")) -> dict[int, dict]:
         t: dict[int, dict] = {}
         if "exit" in kinds:
             for nid in self.exit_nodes:
-                t[nid] = {"kind": "exit", "name": "edge of mapped area"}
+                t[nid] = {"kind": "exit", "name": "edge of the photographed area"}
         for f in self.facilities:
             p = f["properties"]
             if p["kind"] in kinds:
@@ -144,19 +174,33 @@ class Network:
                 # Walled in only by roads we have no imagery for: unknown, not "cut off by flooding".
                 unverified.append(len(blds))
                 continue
-            nres = sum(1 for b in blds if b["properties"]["is_residential"])
+            pops = [self.bpop[b["properties"]["id"]] for b in blds if b["properties"]["id"] in self.bpop]
+            est_pop = sum(x["est_pop"] for x in pops)
+            vul = None
+            tr = [x for x in pops if x["tract"] and x["tract"].get("RPL_THEMES") is not None]
+            if tr:
+                vul = {k: round(sum(float(x["tract"][k] or 0) for x in tr) / len(tr), 3 if k == "RPL_THEMES" else 1)
+                       for k in ("RPL_THEMES", "EP_AGE65", "EP_NOVEH", "EP_DISABL", "EP_LIMENG", "EP_POV150")}
+                vul["tracts"] = sorted({x["tract"]["GEOID"] for x in tr})
+            care = [f["properties"]["name"] for f in self.facilities
+                    if f["properties"]["kind"] in ("nursing_home", "dialysis") and f["properties"]["node_id"] in comp]
+            svi = vul["RPL_THEMES"] if vul else 0.5
+            priority = est_pop * (0.5 + svi) * (1.5 if care else 1.0)
             zones.append({"geom": poly, "props": {
-                "label": label, "building_count": len(blds), "est_pop": round(nres * ppb, 1),
-                "vulnerability": None, "mode": mode,
+                "label": label, "building_count": len(blds), "est_pop": round(est_pop, 1),
+                "vulnerability": vul, "care_facilities": care, "priority_score": round(priority, 1), "mode": mode,
                 "nearest_blocked_segment_ids": [k for k, _ in sorted(blocked.items(), key=lambda kv: kv[1]["properties"]["length_m"])],
                 "node_ids": sorted(int(n) for n in comp), "building_ids": [b["properties"]["id"] for b in blds],
                 "label_point": [round(poly.representative_point().x, 6), round(poly.representative_point().y, 6)],
             }})
-        zones.sort(key=lambda z: -z["props"]["est_pop"])
+        by_people = sorted(range(len(zones)), key=lambda i: -zones[i]["props"]["est_pop"])
+        people_rank = {i: r for r, i in enumerate(by_people, 1)}
+        zones_idx = sorted(range(len(zones)), key=lambda i: -zones[i]["props"]["priority_score"])
         self.unverified[mode] = {"zones": len(unverified), "buildings": sum(unverified)}
         out = []
-        for i, z in enumerate(zones, 1):
-            p = {"id": f"Z{i}", "priority_score": z["props"]["est_pop"], "priority_rank": i, **z["props"]}
+        for rank, i in enumerate(zones_idx, 1):
+            z = zones[i]
+            p = {"id": f"Z{rank}", "priority_rank": rank, "people_rank": people_rank[i], **z["props"]}
             out.append(feature(z["geom"], p))
         return out
 

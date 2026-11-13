@@ -135,3 +135,26 @@ ol.steps { margin: 4px 0; padding-left: 20px; }
   #ev-body { grid-template-columns: 1fr; }
   .compare, .cap { width: 100%; max-width: 360px; } .compare { height: auto; aspect-ratio: 1; }
 }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.areasel select { background: #1d3546; color: #fff; border: 1px solid #36505f; border-radius: 6px; padding: 4px 8px; font: inherit; max-width: 280px; }
+.tabs button { font-size: 13px; padding: 7px 4px; }
+.rank { margin-top: 10px; }
+.who { display: block !important; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.who input { width: 100%; margin-top: 3px; padding: 5px 7px; border: 1px solid var(--rule); border-radius: 6px; font: inherit; }
+.sources div { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; gap: 6px; }
+.sources .b { font-size: 11px; padding: 0 6px; border-radius: 999px; color: #fff; }
+.b.live { background: #1f9d55; } .b.snapshot, .b.cached { background: #b77a00; } .b.unavailable { background: #d7263d; }
+.tool.small { margin-top: 6px; font-size: 12px; padding: 4px 8px; width: 100%; }
+.tool.small[aria-pressed="true"] { background: #b77a00; color: #fff; border-color: #b77a00; }
+.card { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.site { border-left: 4px solid var(--open); cursor: pointer; }
+.site.uncertain { border-left-color: var(--uncertain); } .site.rejected { border-left-color: var(--none); }
+.checks li { list-style: none; margin: 2px 0; } .checks { padding: 0; margin: 4px 0; }
+.ck { display: inline-block; width: 16px; font-weight: 700; } .ck.pass { color: var(--open); } .ck.fail { color: var(--blocked); } .ck.warn { color: #b77a00; }
+.brief { background: #f6f9fa; border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+.brief del { color: var(--blocked); }
+.brief .alert { margin-top: 8px; padding: 8px; background: #fff; border: 1px dashed var(--rule); border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.row button { border: 1px solid var(--rule); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }

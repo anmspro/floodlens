@@ -47,22 +47,58 @@ def split_line(line: LineString, max_len: float, split_if_longer: float) -> list
     return [substring(line, i * L / n, (i + 1) * L / n) for i in range(n)]
 
 
+OVERPASS = ["https://overpass-api.de/api", "https://maps.mail.ru/osm/tools/overpass/api",
+            "https://overpass.kumi.systems/api"]
+
+
 def _osmnx_settings(s: Settings) -> None:
     ox.settings.cache_folder = str(s.cache / "osmnx")
     ox.settings.use_cache = True
+    ox.settings.requests_timeout = 300
+    ox.settings.http_user_agent = "floodlens-hackathon (OSMnx)"
+
+
+def with_overpass_retry(fn, *a, log=print, **kw):
+    """Try each Overpass mirror twice before giving up (the public servers rate-limit)."""
+    import time
+    last = None
+    for attempt in range(2):
+        for url in OVERPASS:
+            ox.settings.overpass_url = url
+            try:
+                return fn(*a, **kw)
+            except Exception as e:  # noqa: BLE001
+                if "No matching features" in str(e) or type(e).__name__ == "InsufficientResponseError":
+                    raise
+                last = e
+                log(f"  overpass {url} failed: {type(e).__name__}; trying next")
+                time.sleep(5 * (attempt + 1))
+    raise last
 
 
 def snapshot_dir(s: Settings) -> Path:
-    return s.data / "raw" / "snapshots" / "osm"
+    return s.snapshots / s.area_id / "osm"
+
+
+def coverage(s: Settings, buffer_m: float = 0.0):
+    """Union of photo tile footprints (EPSG:4326), optionally buffered in metres."""
+    import json
+    from shapely.geometry import shape
+    cov = shape(json.loads((s.derived / "coverage.geojson").read_text())["features"][0]["geometry"])
+    if buffer_m:
+        utm = utm_crs_for(s.bbox)
+        cov = reproject_geom(reproject_geom(cov, WGS84, utm).buffer(buffer_m), utm, WGS84)
+    return cov
 
 
 def load_graph(s: Settings, log=print):
     """Live fetch with snapshot fallback. Returns (graph, meta)."""
     _osmnx_settings(s)
-    w, so, e, n = s.bbox
     snap = snapshot_dir(s) / "graph.graphml"
     try:
-        G = ox.graph_from_bbox(bbox=(w, so, e, n), network_type="drive", simplify=True, truncate_by_edge=True)
+        poly = coverage(s, float(s.get("osm.coverage_buffer_m", 150)))
+        G = with_overpass_retry(ox.graph_from_polygon, poly, network_type="drive", simplify=True,
+                                truncate_by_edge=True, log=log)
         snap.parent.mkdir(parents=True, exist_ok=True)
         ox.save_graphml(G, snap)
         return G, {"source": "osm", "status": "live", "fetched_at": now_iso(), "error": None}
@@ -74,10 +110,11 @@ def load_graph(s: Settings, log=print):
 
 
 def _features(s: Settings, tags: dict, name: str, log=print):
-    w, so, e, n = s.bbox
+    _osmnx_settings(s)
     snap = snapshot_dir(s) / f"{name}.gpkg"
     try:
-        gdf = ox.features_from_bbox(bbox=(w, so, e, n), tags=tags)
+        gdf = with_overpass_retry(ox.features_from_polygon, coverage(s, float(s.get("osm.coverage_buffer_m", 150))),
+                                  tags=tags, log=log)
         gdf = gdf.reset_index()
         snap.parent.mkdir(parents=True, exist_ok=True)
         keep = [c for c in gdf.columns if c in ("element", "id", "geometry", "building", "name", "amenity",
@@ -153,12 +190,21 @@ def prepare(s: Settings, log=print) -> dict:
 
     node_ids = list(Gp.nodes)
     xy = np.array([[Gp.nodes[i]["x"], Gp.nodes[i]["y"]] for i in node_ids])
+    # exits: where a road leaves the photographed area (beyond it we know nothing)
+    from shapely.prepared import prep
+    cov = coverage(s)
+    cov_p = prep(cov)
+    exits = [int(n) for n, d in G.nodes(data=True) if not cov_p.contains(Point(d["x"], d["y"]))]
+    import json
+    (s.derived / "exits.json").write_text(json.dumps(exits))
+    cov_utm = prep(reproject_geom(cov, WGS84, utm))
 
     # buildings
     bld = _features(s, {"building": True}, "buildings", log)
     b_feats = []
     if len(bld):
         bld = bld[bld.geometry.type.isin(["Polygon", "MultiPolygon"])].to_crs(utm)
+        bld = bld[[cov_utm.contains(g.centroid) for g in bld.geometry]]
         cents = np.array([[g.centroid.x, g.centroid.y] for g in bld.geometry])
         nn = nearest_nodes(xy, node_ids, cents) if len(cents) else []
         for (_, r), node in zip(bld.iterrows(), nn):
@@ -211,7 +257,41 @@ def prepare(s: Settings, log=print) -> dict:
     write_geojson(s.derived / "road_edges.geojson", edge_feats.values())
     write_geojson(s.derived / "buildings.geojson", b_feats)
     write_geojson(s.derived / "facilities.geojson", f_feats)
-    summary = {"segments": len(seg_feats), "edges": len(edge_feats), "nodes": len(node_ids),
+    summary = {"area": s.area_id, "segments": len(seg_feats), "edges": len(edge_feats), "nodes": len(node_ids), "exits": len(exits),
                "buildings": len(b_feats), "facilities": len(f_feats), "osm": meta["status"]}
     log(f"prepared: {summary}")
     return summary
+
+
+EXTRA_TAGS = {
+    "amenity": ["parking", "school", "college", "community_centre", "place_of_worship", "university"],
+    "leisure": ["pitch", "park", "sports_centre", "recreation_ground", "playground"],
+    "landuse": ["recreation_ground", "farmland", "meadow", "orchard", "vineyard", "farmyard"],
+    "shop": ["supermarket", "convenience", "grocery", "greengrocer", "general"],
+}
+
+
+def extra_features(s: Settings, log=print):
+    """One Overpass query per area for relief candidates, farmland and food stores, cached as a snapshot."""
+    import geopandas as gpd
+    snap = snapshot_dir(s) / "extras.gpkg"
+    if snap.exists():
+        return gpd.read_file(snap)
+    _osmnx_settings(s)
+    poly = coverage(s, 1500)
+    try:
+        g = with_overpass_retry(ox.features_from_polygon, poly, tags=EXTRA_TAGS, log=log).reset_index()
+    except Exception as e:  # noqa: BLE001
+        if "No matching features" in str(e) or type(e).__name__ == "InsufficientResponseError":
+            g = gpd.GeoDataFrame(columns=["element", "id", "geometry"], geometry="geometry", crs=WGS84)
+        else:
+            raise
+    keep = [c for c in ("element", "id", "geometry", "name", "amenity", "leisure", "landuse", "shop", "surface") if c in g.columns]
+    g = g[keep]
+    for c in keep:
+        if c != "geometry":
+            g[c] = g[c].astype(str).where(g[c].notna(), None)
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    g.to_file(snap, driver="GPKG")
+    log(f"[{s.area_id}] OSM extras: {len(g)} features")
+    return gpd.read_file(snap)

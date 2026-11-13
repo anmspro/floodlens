@@ -1,6 +1,8 @@
 """Fetch the organizer dataset (metadata + only the AOI images) and check it."""
 from __future__ import annotations
 
+import json
+import math
 import time
 import urllib.request
 from pathlib import Path
@@ -42,43 +44,72 @@ def load_metadata(s: Settings) -> pd.DataFrame:
     return m
 
 
-def aoi_pairs(s: Settings, m: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Response (after) rows whose footprint intersects the AOI, joined to their before image."""
+def tile_xy(west: float, north: float, z: int) -> tuple[int, int]:
+    x = int(round((west + 180) / 360 * 2 ** z))
+    lat = math.radians(north)
+    y = int(round((1 - math.log(math.tan(lat) + 1 / math.cos(lat)) / math.pi) / 2 * 2 ** z))
+    return x, y
+
+
+def area_tiles(s: Settings, m: pd.DataFrame | None = None) -> pd.DataFrame:
+    """One row per after (response) image in the area, joined to its before image when one exists."""
     m = load_metadata(s) if m is None else m
-    w, so, e, n = s.bbox
-    after = m[(m["image_role"] == "response") & m["paired_image_id"].ne("")]
-    eps = 1e-6  # tiles that only share an edge with the AOI are not included
-    hit = after[(after.west_f < e - eps) & (after.east_f > w + eps) & (after.south_f < n - eps) & (after.north_f > so + eps)]
-    before = m.set_index("image_id")
+    locs = set(s.area["localities"])
+    after = m[(m["image_role"] == "response") & m["locality"].isin(locs) & m["west_f"].notna()]
+    by_id = m.set_index("image_id")
     rows = []
-    for _, r in hit.iterrows():
-        b = before.loc[r["paired_image_id"]]
+    for _, r in after.iterrows():
+        z = int(round(math.log2(360 / (r.east_f - r.west_f))))
+        tx, ty = tile_xy(r.west_f, r.north_f, z)
+        pre = r["paired_image_id"]
+        b = by_id.loc[pre] if pre and pre in by_id.index else None
         rows.append({
-            "pair_key": r["pair_key"],
             "post_id": r["image_id"], "post_path": r["image_path"], "post_date": r["acquisition_date"],
-            "pre_id": r["paired_image_id"], "pre_path": b["image_path"], "pre_date": b["acquisition_date"],
+            "pre_id": pre if b is not None else "", "pre_path": b["image_path"] if b is not None else "",
+            "pre_date": b["acquisition_date"] if b is not None else "",
             "west": r.west_f, "south": r.south_f, "east": r.east_f, "north": r.north_f,
-            "locality": r["locality"], "spatial_block": r["spatial_block_005deg"],
+            "z": z, "tx": tx, "ty": ty, "locality": r["locality"],
+            "spatial_block": r["spatial_block_005deg"], "pair_key": r["pair_key"],
         })
     return pd.DataFrame(rows)
 
 
 def fetch(s: Settings, log=print) -> pd.DataFrame:
-    m = load_metadata(s)
-    pairs = aoi_pairs(s, m)
-    if pairs.empty:
-        raise SystemExit("No organizer tiles intersect aoi.bbox. Check config.yaml.")
-    paths = list(pairs.post_path) + list(pairs.pre_path)
-    log(f"AOI has {len(pairs)} before/after pairs ({len(paths)} images)")
-    for i, rel in enumerate(paths, 1):
-        dest = s.dataset_dir / rel
-        if dest.exists() and dest.stat().st_size > 0:
-            continue
-        _download(f"{s['dataset']['hf_base_url']}/{rel}", dest)
-        log(f"  [{i}/{len(paths)}] {rel}")
+    tiles = area_tiles(s)
+    if tiles.empty:
+        raise SystemExit(f"No organizer tiles for area {s.area_id}. Check its localities in config.yaml.")
+    paths = [p for p in list(tiles.post_path) + list(tiles.pre_path) if p]
+    log(f"[{s.area_id}] {len(tiles)} tiles, {len(paths)} images")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    todo = [rel for rel in paths if not ((s.dataset_dir / rel).exists() and (s.dataset_dir / rel).stat().st_size > 0)]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futs = [ex.submit(_download, f"{s['dataset']['hf_base_url']}/{rel}", s.dataset_dir / rel) for rel in todo]
+        for i, f in enumerate(as_completed(futs), 1):
+            f.result()
+            if i % 50 == 0 or i == len(todo):
+                log(f"  {i}/{len(todo)} downloaded")
     s.derived.mkdir(parents=True, exist_ok=True)
-    pairs.to_csv(s.derived / "aoi_pairs.csv", index=False)
-    return pairs
+    tiles.to_csv(s.derived / "tiles.csv", index=False)
+    write_area_info(s, tiles)
+    return tiles
+
+
+def write_area_info(s: Settings, tiles: pd.DataFrame) -> dict:
+    from shapely.geometry import box, mapping
+    from shapely.ops import unary_union
+    cov = unary_union([box(r.west, r.south, r.east, r.north) for r in tiles.itertuples()])
+    info = {
+        "id": s.area_id, "name": s.area["name"], "event": s.event["name"], "mode": s.area.get("mode", "pair"),
+        "bbox": [round(v, 7) for v in cov.bounds], "n_tiles": int(len(tiles)),
+        "zooms": sorted(int(z) for z in tiles.z.unique()),
+        "after_dates": sorted(tiles.post_date.unique().tolist()),
+        "before_dates": sorted(d for d in tiles.pre_date.unique().tolist() if d),
+        "localities": sorted(tiles.locality.unique().tolist()),
+    }
+    (s.derived / "area.json").write_text(json.dumps(info, indent=1))
+    (s.derived / "coverage.geojson").write_text(json.dumps(
+        {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": mapping(cov)}]}))
+    return info
 
 
 def check(s: Settings, log=print) -> dict:

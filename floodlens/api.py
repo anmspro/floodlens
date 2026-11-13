@@ -1,4 +1,4 @@
-"""FastAPI app: serves the map UI, derived layers, chips and analysis endpoints."""
+"""FastAPI app: map UI, per-area layers, chips, web tiles, analysis, routing, briefs."""
 from __future__ import annotations
 
 import json
@@ -13,25 +13,34 @@ from pydantic import BaseModel
 from floodlens.config import ROOT, get_settings
 from floodlens.geo import now_iso, read_geojson, write_geojson
 
-s = get_settings()
+BASE = get_settings()
 app = FastAPI(title="FloodLens")
 LOCK = threading.Lock()
-LAYERS = {"road_segments", "road_edges", "buildings", "facilities", "cutoff_zones_strict", "cutoff_zones_permissive"}
+LAYERS = {"road_segments", "road_edges", "buildings", "facilities", "cutoff_zones_strict", "cutoff_zones_permissive",
+          "coverage", "context_warnings", "context_tracts", "impact_buildings", "impact_fields", "relief_sites"}
 HIGHWAY_RANK = {"primary": 0, "secondary": 1, "tertiary": 2, "unclassified": 3, "residential": 4}
 
-for mount, path in (("/static", ROOT / "web"), ("/chips", s.chips), ("/imagery", s.derived / "web")):
+for mount, path in (("/static", ROOT / "web"), ("/chips", BASE.data / "chips"), ("/tiles", BASE.data / "tiles")):
     path.mkdir(parents=True, exist_ok=True)
     app.mount(mount, StaticFiles(directory=path), name=mount.strip("/"))
 
-_net = None
+_nets: dict[str, object] = {}
 
 
-def net():
-    global _net
-    if _net is None:
+def area(area_id: str):
+    if area_id not in BASE.area_ids:
+        raise HTTPException(404, f"unknown area {area_id}")
+    s = BASE.for_area(area_id)
+    if not (s.derived / "road_segments.geojson").exists():
+        raise HTTPException(409, f"area {area_id} is not processed yet")
+    return s
+
+
+def net(s):
+    if s.area_id not in _nets:
         from floodlens.analysis import Network
-        _net = Network(s)
-    return _net
+        _nets[s.area_id] = Network(s)
+    return _nets[s.area_id]
 
 
 @app.get("/")
@@ -41,18 +50,33 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "vlm_mock": s.vlm_mock, "model": s.vlm_model, "time": now_iso()}
+    return {"ok": True, "vlm_mock": BASE.vlm_mock, "model": BASE.vlm_model, "time": now_iso()}
 
 
-@app.get("/api/config")
-def config():
-    idx = s.derived / "web" / "index.json"
-    return {"event": s["event"], "bbox": s.bbox, "aoi": s["aoi"]["name"], "model": s.vlm_model,
-            "layers": sorted(LAYERS), "overlays": json.loads(idx.read_text()) if idx.exists() else {"pre": [], "post": []}}
+@app.get("/api/areas")
+def areas():
+    out = []
+    for a in BASE.area_ids:
+        s = BASE.for_area(a)
+        info_p, sum_p = s.derived / "area.json", s.derived / "summary.json"
+        info = json.loads(info_p.read_text()) if info_p.exists() else {"id": a, "name": s.area["name"]}
+        info["ready"] = (s.derived / "road_segments.geojson").exists() and sum_p.exists()
+        info["summary"] = json.loads(sum_p.read_text()) if sum_p.exists() else None
+        out.append(info)
+    return {"default": BASE.raw.get("default_area"), "areas": out}
 
 
-@app.get("/api/layers/{name}")
-def layer(name: str):
+@app.get("/api/{area_id}/config")
+def config(area_id: str):
+    s = area(area_id)
+    wt = s.derived / "web_tiles.json"
+    return {"area": s.area_info, "event": s.event, "model": BASE.vlm_model, "paired": s.paired,
+            "layers": sorted(LAYERS), "tiles": json.loads(wt.read_text()) if wt.exists() else {}}
+
+
+@app.get("/api/{area_id}/layers/{name}")
+def layer(area_id: str, name: str):
+    s = area(area_id)
     if name not in LAYERS:
         raise HTTPException(404, "unknown layer")
     p = s.derived / f"{name}.geojson"
@@ -61,8 +85,33 @@ def layer(name: str):
     return JSONResponse(json.loads(p.read_text()))
 
 
-@app.get("/api/review")
-def review_queue(status: str = "uncertain", limit: int = 100):
+@app.get("/api/{area_id}/summary")
+def summary(area_id: str):
+    s = area(area_id)
+    p = s.derived / "summary.json"
+    if not p.exists():
+        with LOCK:
+            net(s).run()
+    return json.loads(p.read_text())
+
+
+@app.get("/api/{area_id}/impact")
+def impact(area_id: str):
+    s = area(area_id)
+    p = s.derived / "impact.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+@app.get("/api/{area_id}/relief")
+def relief(area_id: str):
+    s = area(area_id)
+    p = s.derived / "relief.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+@app.get("/api/{area_id}/review")
+def review_queue(area_id: str, status: str = "uncertain", limit: int = 100):
+    s = area(area_id)
     segs = [f["properties"] for f in read_geojson(s.derived / "road_segments.geojson")
             if f["properties"]["status"] == status and f["properties"].get("chip_url")
             and f["properties"]["status_source"] != "human"]
@@ -72,64 +121,64 @@ def review_queue(status: str = "uncertain", limit: int = 100):
 
 class ReviewBody(BaseModel):
     status: Literal["open", "blocked", "uncertain"]
+    reviewer: str | None = None
 
 
-@app.post("/api/review/{segment_id}")
-def review(segment_id: str, body: ReviewBody):
+@app.post("/api/{area_id}/review/{segment_id}")
+def review(area_id: str, segment_id: str, body: ReviewBody):
+    s = area(area_id)
     with LOCK:
         feats = read_geojson(s.derived / "road_segments.geojson")
         hit = next((f for f in feats if f["properties"]["id"] == segment_id), None)
         if hit is None:
             raise HTTPException(404, "unknown segment")
-        hit["properties"].update(status=body.status, status_source="human", updated_at=now_iso())
+        p = hit["properties"]
+        if p["status_source"] == "vlm":
+            p["vlm_status"] = p["status"]
+        p.update(status=body.status, status_source="human", updated_at=now_iso(), reviewer=body.reviewer)
         write_geojson(s.derived / "road_segments.geojson", feats)
-        summary = net().run()
-    return {"segment": hit["properties"], "analysis": summary}
+        from floodlens import evaluate
+        evaluate.record_label(s, segment_id, body.status, body.reviewer, p.get("vlm_status"))
+        result = net(s).run()
+    return {"segment": p, "analysis": result}
 
 
-@app.get("/api/summary")
-def summary():
-    p = s.derived / "summary.json"
-    if not p.exists():
-        with LOCK:
-            net().run()
-    return json.loads(p.read_text())
+_meta = None
 
 
-_ctx = None
-
-
-@app.get("/api/context/{segment_id}")
-def context(segment_id: str):
-    """Per-tile context from the organizer metadata for the tile under this road segment."""
-    global _ctx
+@app.get("/api/{area_id}/context/{segment_id}")
+def context(area_id: str, segment_id: str):
+    """Per-tile organizer metadata + public context for the tile under this road piece."""
+    global _meta
     import pandas as pd
-    from shapely.geometry import shape
-    if _ctx is None:
-        m = pd.read_csv(s.dataset_dir / "image_metadata.csv", dtype="string", keep_default_na=False)
-        pairs = pd.read_csv(s.derived / "aoi_pairs.csv")
-        _ctx = m[m.image_id.isin(pairs.post_id)].copy()
-        for c in ("west", "south", "east", "north"):
-            _ctx[c] = pd.to_numeric(_ctx[c])
+    s = area(area_id)
+    if _meta is None:
+        _meta = pd.read_csv(s.dataset_dir / "image_metadata.csv", dtype="string", keep_default_na=False).set_index("image_id")
     f = next((f for f in read_geojson(s.derived / "road_segments.geojson") if f["properties"]["id"] == segment_id), None)
     if f is None:
         raise HTTPException(404, "unknown segment")
-    c = shape(f["geometry"]).centroid
-    row = _ctx[(_ctx.west <= c.x) & (_ctx.east >= c.x) & (_ctx.south <= c.y) & (_ctx.north >= c.y)]
-    if row.empty:
-        return {"tile": None}
-    r = row.iloc[0]
-    keep = ["image_id", "acquisition_date", "locality", "fema_flood_zones", "fema_sfha_tf", "precipitation_mm",
-            "preceding_3d_precipitation_mm", "preceding_7d_precipitation_mm", "precipitation_station_name",
-            "usgs_gage_height_station_name", "usgs_daily_mean_gage_height_si", "usgs_gage_height_si_unit",
-            "usgs_daily_mean_discharge_si", "usgs_discharge_si_unit", "elevation_m"]
-    return {"tile": {k: r[k] for k in keep if k in r.index and r[k] != ""}}
+    tid = f["properties"].get("tile_id")
+    tile = None
+    if tid and tid in _meta.index:
+        r = _meta.loc[tid]
+        keep = ["acquisition_date", "locality", "fema_flood_zones", "fema_sfha_tf", "precipitation_mm",
+                "preceding_3d_precipitation_mm", "preceding_7d_precipitation_mm", "precipitation_station_name",
+                "usgs_gage_height_station_name", "usgs_daily_mean_gage_height_si", "usgs_gage_height_si_unit",
+                "usgs_daily_mean_discharge_si", "usgs_discharge_si_unit", "elevation_m"]
+        tile = {"image_id": tid, **{k: r[k] for k in keep if k in r.index and r[k] != ""}}
+    try:
+        from floodlens import sources
+        public = sources.context_for_segment(s, f)
+    except Exception as e:  # noqa: BLE001
+        public = {"error": str(e)}
+    return {"tile": tile, "public": public}
 
 
-@app.post("/api/analyze")
-def analyze():
+@app.post("/api/{area_id}/analyze")
+def analyze(area_id: str):
+    s = area(area_id)
     with LOCK:
-        return net().run()
+        return net(s).run()
 
 
 class RouteBody(BaseModel):
@@ -139,9 +188,41 @@ class RouteBody(BaseModel):
     target_kinds: list[str] = ["shelter", "hospital", "exit"]
 
 
-@app.post("/api/route")
-def route(body: RouteBody):
+@app.post("/api/{area_id}/route")
+def route(area_id: str, body: RouteBody):
+    s = area(area_id)
     with LOCK:
-        n = net()
+        n = net(s)
         n.recompute_inputs()
         return n.route(body.lat, body.lon, body.mode, tuple(body.target_kinds))
+
+
+class BriefBody(BaseModel):
+    zone_id: str | None = None
+    mode: Literal["strict", "permissive"] = "permissive"
+    lang: Literal["en", "es"] = "en"
+
+
+@app.post("/api/{area_id}/brief")
+def brief(area_id: str, body: BriefBody):
+    s = area(area_id)
+    from floodlens import brief as b
+    return b.make_brief(s, body.zone_id, body.mode, body.lang)
+
+
+@app.get("/api/{area_id}/sources")
+def sources_status(area_id: str):
+    s = area(area_id)
+    from floodlens import sources
+    return sources.status(s)
+
+
+class FaultBody(BaseModel):
+    source: str
+    mode: Literal["none", "down", "slow", "corrupt"]
+
+
+@app.post("/api/admin/fault")
+def fault(body: FaultBody):
+    from floodlens import sources
+    return sources.set_fault(body.source, body.mode)

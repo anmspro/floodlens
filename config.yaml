@@ -1,28 +1,63 @@
 # FloodLens configuration. Paths are relative to the repo root.
 
-event:
-  name: "Hurricane Harvey, Addicks and Barker (West Houston)"
-  date: "2017-08-30"          # date of the NOAA after imagery
-  before_date: "2016 (USDA NAIP)"
-
 dataset:
   hf_base_url: "https://huggingface.co/datasets/jennifer-fowler/UTSA-flood-images/resolve/main"
   dir: "data/raw/Texas_Flood_Student_Data"
 
-aoi:
-  name: "addicks_north"
-  # west, south, east, north (WGS84). This is the 5 x 5 block of zoom-16 tiles
-  # x 15352-15356, y 27071-27075 in the West Houston / Addicks and Barker set.
-  bbox: [-95.6689453, 29.8215827, -95.6414795, 29.8454086]
-  locality_prefix: "West Houston"
+events:
+  harvey:
+    name: "Hurricane Harvey"
+    before_label: "2016 (USDA NAIP)"
+    window: ["2017-08-25", "2017-09-06"]
+    nws_offices: ["HGX", "LCH"]
+  guadalupe_2025:
+    name: "Guadalupe River flood, July 2025"
+    before_label: null
+    window: ["2025-07-03", "2025-07-23"]
+    nws_offices: ["EWX"]
+
+# Every area the organizer dataset covers. Tiles are selected by `locality`.
+# mode: pair = before/after pairs, after_only = no before image exists.
+default_area: "west_houston"
+areas:
+  west_houston:
+    name: "West Houston: Addicks and Barker"
+    event: harvey
+    mode: pair
+    localities: ["West Houston / Addicks and Barker", "Bear Creek / west Houston", "Eldridge / northwest Houston"]
+  richmond:
+    name: "Richmond and Rosenberg (Brazos River)"
+    event: harvey
+    mode: pair
+    localities: ["Richmond / Rosenberg / Brazos"]
+  kingwood:
+    name: "Kingwood and Forest Cove (San Jacinto River)"
+    event: harvey
+    mode: pair
+    localities: ["Forest Cove / Kingwood", "Kingwood / northeast Houston"]
+  bevil_oaks:
+    name: "Bevil Oaks (Pine Island Bayou)"
+    event: harvey
+    mode: pair
+    localities: ["Bevil Oaks / Pine Island Bayou"]
+  simonton:
+    name: "Simonton (Brazos River)"
+    event: harvey
+    mode: pair
+    localities: ["Simonton / Brazos"]
+  hill_country:
+    name: "Texas Hill Country (Guadalupe River)"
+    event: guadalupe_2025
+    mode: after_only
+    localities: ["Hunt / Guadalupe River", "Ingram / Guadalupe River", "Kerrville / Guadalupe River",
+                 "Center Point / Guadalupe River", "Comfort / Guadalupe River"]
 
 imagery:
-  # organizer = organizer PNG tiles + WGS84 bounds, written to GeoTIFF (EPSG:3857)
-  # geotiff   = use your own GeoTIFFs from the globs below (any CRS, reprojected)
-  source: "organizer"
-  pre_glob: "data/raw/imagery/pre/*.tif"
-  post_glob: "data/raw/imagery/post/*.tif"
-  web_overlay_px: 1024
+  tile_format: "webp"     # web map tiles cut from the GeoTIFFs
+  min_zoom: 12
+
+osm:
+  coverage_buffer_m: 150  # fetch roads this far beyond the photographed area
 
 roads:
   max_segment_m: 100
@@ -30,22 +65,21 @@ roads:
   chip_buffer_m: 20
   chip_min_side_m: 80
   chip_px: 448
+  min_valid_fraction: 0.5
 
 vlm:
   model: "qwen3-vl-8b-instruct"
-  prompt_id: "roads_v2"
+  # jury = pair question (roads_v2) + after-only surface question (surface_v1);
+  # any "water" answer makes the road blocked. after_only areas use surface_v1 alone.
+  method: "jury"
 
 thresholds:
   road:
     blocked_min_conf: 0.6
     open_min_conf: 0.6
 
-limits:
-  max_road_segments: 1500
-
 routing:
   uncertain_penalty: 4.0
-  exit_buffer_m: 50
 
 cutoff:
   min_buildings: 3

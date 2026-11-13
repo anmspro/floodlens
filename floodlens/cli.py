@@ -1,4 +1,4 @@
-"""FloodLens CLI. Run from the repo root:  python -m floodlens <command>
+"""FloodLens CLI. Run from the repo root:  python -m floodlens <command> [--area NAME|all]
 
 Every command appends a line to ops/RUNLOG.md. A failing command also writes
 ops/errors/<time>_<command>.md with the traceback, so it can be committed and
@@ -22,6 +22,7 @@ from floodlens.config import ROOT, get_settings
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 OPS = ROOT / "ops"
+AREA = typer.Option(None, "--area", "-a", help="area id from config.yaml, or 'all' (default: default_area)")
 
 
 def _git_rev() -> str:
@@ -57,7 +58,8 @@ def logged(fn):
             err_file = _write_error(name, stamp, traceback.format_exc())
             raise
         finally:
-            line = f"| {stamp} | {name} | {status} | {time.time() - t0:.1f}s | {_git_rev()} | {platform.node()} | {err_file} |\n"
+            area = kw.get("area") or ""
+            line = f"| {stamp} | {name} {area} | {status} | {time.time() - t0:.1f}s | {_git_rev()} | {platform.node()} | {err_file} |\n"
             log = OPS / "RUNLOG.md"
             if not log.exists():
                 log.write_text("| time (UTC) | command | status | duration | commit | host | error file |\n|---|---|---|---|---|---|---|\n")
@@ -78,12 +80,19 @@ def _write_error(name: str, stamp: str, tb: str) -> str:
     return str(path.relative_to(ROOT))
 
 
+def areas(area: str | None):
+    base = get_settings()
+    ids = base.area_ids if area == "all" else [area or base.raw.get("default_area")]
+    return [base.for_area(a) for a in ids]
+
+
 @app.command("fetch-data")
 @logged
-def fetch_data():
-    """Download image_metadata.csv and only the AOI before/after images from Hugging Face."""
+def fetch_data(area: str = AREA):
+    """Download image_metadata.csv and the before/after images of the area(s) from Hugging Face."""
     from floodlens import data
-    data.fetch(get_settings())
+    for s in areas(area):
+        data.fetch(s)
 
 
 @app.command("check-data")
@@ -98,56 +107,94 @@ def check_data():
 
 @app.command()
 @logged
-def imagery():
-    """Write GeoTIFFs (EPSG:3857), build pre/post mosaics and web overlays for the AOI."""
+def imagery(area: str = AREA):
+    """Write one GeoTIFF (EPSG:3857) per photo and cut web map tiles."""
     import pandas as pd
-    from floodlens import data, imagery as im
-    s = get_settings()
-    p = s.derived / "aoi_pairs.csv"
-    pairs = pd.read_csv(p) if p.exists() else data.aoi_pairs(s)
-    tifs = im.build_geotiffs(s, pairs)
-    im.build_mosaics(s, tifs)
-    im.build_web_overlays(s, pairs)
+    from floodlens import imagery as im
+    for s in areas(area):
+        tiles = pd.read_csv(s.derived / "tiles.csv", keep_default_na=False)
+        im.build_geotiffs(s, tiles)
+        im.build_web_tiles(s, tiles)
 
 
 @app.command()
 @logged
-def prepare():
-    """Fetch OSM roads, buildings and facilities for the AOI and split roads into <=100 m segments."""
+def prepare(area: str = AREA):
+    """Fetch OSM roads, buildings and facilities inside the photographed area; cut roads into <=100 m pieces."""
     from floodlens import osm
-    osm.prepare(get_settings())
+    for s in areas(area):
+        osm.prepare(s)
 
 
 @app.command()
 @logged
-def chips(force: bool = False):
-    """Cut before/after chips for every road segment."""
+def chips(area: str = AREA, force: bool = False):
+    """Cut before/after chips for every road piece."""
     from floodlens import roads
-    roads.make_chips(get_settings(), force=force)
+    for s in areas(area):
+        roads.make_chips(s, force=force)
 
 
 @app.command()
 @logged
-def label(force: bool = False, limit: int = typer.Option(None, help="label at most N segments")):
-    """Ask the VLM about every pending road segment (cached)."""
+def label(area: str = AREA, force: bool = False, limit: int = typer.Option(None, help="label at most N pieces")):
+    """Ask the VLM jury about every pending road piece (cached)."""
     from floodlens import roads
-    print(roads.label_roads(get_settings(), force=force, limit=limit))
+    for s in areas(area):
+        print(roads.label_roads(s, force=force, limit=limit))
 
 
 @app.command("vlm-check")
 @logged
-def vlm_check(n: int = 20):
-    """One image question on the first AOI pair, then seconds per chip on N chips."""
+def vlm_check(area: str = AREA, n: int = 20):
+    """One image question on the first tile, then seconds per road on N chips."""
     from floodlens import roads
-    print(json.dumps(roads.vlm_check(get_settings(), n=n), indent=1))
+    for s in areas(area):
+        print(json.dumps(roads.vlm_check(s, n=n), indent=1))
 
 
 @app.command()
 @logged
-def analyze():
-    """Compute edge status, cut-off zones (strict and permissive) and facility reachability."""
+def analyze(area: str = AREA):
+    """Edge status, cut-off neighbourhoods (strict and permissive) and facility reachability."""
     from floodlens.analysis import Network
-    print(Network(get_settings()).run())
+    for s in areas(area):
+        print(s.area_id, Network(s).run())
+
+
+@app.command()
+@logged
+def evaluate(area: str = AREA, n: int = 60):
+    """Baselines, controls and (when hand labels exist) accuracy. Writes docs/EVALUATION.md."""
+    from floodlens import evaluate as ev
+    ev.run(areas(area), n=n)
+
+
+@app.command("fetch-context")
+@logged
+def fetch_context(area: str = AREA):
+    """Download public context data (SVI, tracts, NWS warnings, FloodSentinel...) into snapshots."""
+    from floodlens import sources
+    for s in areas(area):
+        sources.fetch_all(s)
+
+
+@app.command()
+@logged
+def impact(area: str = AREA, n: int = 600):
+    """Economic impact estimate: sampled buildings + farmland checked by the VLM (plan 8a)."""
+    from floodlens import impact as im
+    for s in areas(area):
+        im.run(s, n=n)
+
+
+@app.command()
+@logged
+def relief(area: str = AREA):
+    """Relief site recommender (plan 8b)."""
+    from floodlens import relief as rl
+    for s in areas(area):
+        rl.run(s)
 
 
 @app.command()
@@ -160,16 +207,15 @@ def serve(port: int = 8501, host: str = "127.0.0.1"):
 
 @app.command("all")
 @logged
-def run_all():
+def run_all(area: str = AREA):
     """fetch-data -> imagery -> prepare -> chips -> label -> analyze"""
     from floodlens import data, imagery as im, osm, roads
     from floodlens.analysis import Network
-    s = get_settings()
-    pairs = data.fetch(s)
-    tifs = im.build_geotiffs(s, pairs)
-    im.build_mosaics(s, tifs)
-    im.build_web_overlays(s, pairs)
-    osm.prepare(s)
-    roads.make_chips(s)
-    roads.label_roads(s)
-    print(Network(s).run())
+    for s in areas(area):
+        tiles = data.fetch(s)
+        im.build_geotiffs(s, tiles)
+        im.build_web_tiles(s, tiles)
+        osm.prepare(s)
+        roads.make_chips(s)
+        roads.label_roads(s)
+        print(s.area_id, Network(s).run())

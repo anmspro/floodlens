@@ -37,7 +37,8 @@ Everything is shown on one MapLibre dashboard with toggleable layers, a ranked a
 | 3 | MCP public-data layer with fallback, VLM context enrichment, vulnerability-weighted ranking, failure demo | Yes |
 | 3b | Demo-grade interface (judged criterion "Interface and Usability"), see section 7b | Yes |
 | 3c | Chat model in the main path: cited dispatch brief + Spanish alert (moved forward from Tier 6) | Yes |
-| 4 | Building and facility damage from before/after imagery | If time |
+| 4 | Building flooding from before/after imagery + **economic impact estimate** (homes, farmland), see section 8 | Yes (team request) |
+| 4b | **Relief site recommender**: dry open areas checked by the VLM, filtered for safety and access, chosen to cover the most vulnerable need, see section 8b | Yes (team request) |
 | 5 | Crowd-sourced photo verification with privacy handling | If time |
 | 6 | Multilingual alerts + resident text interface | If time |
 | 7 | Contamination (hazmat / wastewater) warnings | If time |
@@ -601,6 +602,30 @@ Goal: a judge understands the problem and the answer within 10 seconds of seeing
 4. Facilities get the same label in `site_status`; facility cards show "flooded" badges.
 5. Frontend: building layer colored by severity (0 none, 1 `#FFE08A`, 2 `#F4A261`, 3 `#D7263D`, 4 `#5C0A14`); before/after swipe using `maplibre-gl-compare` with pre on the left and post on the right; action panel tab "Most damaged" sorted by severity then est_pop.
 6. Acceptance: 200+ buildings labeled; evidence panel shows both chips side by side.
+
+## 8a. Tier 4 amendment — Economic impact (team request, 13 Nov)
+
+Goal: an honest estimate of what the flood cost in each area, built from the same imagery, with every number carrying its source and a range.
+
+1. **Building check.** For a random sample of up to 1,000 residential buildings per area (seed fixed, so the estimate is reproducible), crop before and after around the footprint and ask the VLM how far water reaches: `none | around | at_walls | deep | unknown`. Random sampling lets us extrapolate to every building in the area with a 95% interval instead of labelling all of them.
+2. **Values.** Pre-flood median home value per census tract from the ACS 2016 5-year summary file (table B25077, no API key needed). Hill Country uses the latest ACS available.
+3. **Damage ratio per class.** Calibrated from real claims: OpenFEMA NFIP v3 claims for the event (date of loss in the event window, same counties) give `buildingDamageAmount / buildingPropertyValue` by `waterDepth`. Map the VLM classes to depth bands (around = under 1 ft, at_walls = 1-3 ft, deep = over 3 ft) and take the median ratio per band.
+4. **Market effect (separate line, cited).** Floodplain discount after Harvey of 3.1-5.5% (Freddie Mac). Shown as a range, never added to the damage total without a label.
+5. **Farmland.** OSM farmland and meadow polygons inside the photographed area. The VLM checks a crop of each field (pair areas: new water; Hill Country: water, sand or mud deposit, debris). Report flooded or scoured acres. Dollar values only with a cited per-acre figure.
+6. **Validation.** Compare our estimated building damage per tract with the NFIP paid claims per tract (a lower bound, since many homes are uninsured). Report the correlation.
+7. **UI.** An "Impact" panel per area: homes with water at walls or deeper, estimated building damage (range), affected value, farmland acres, and the method in plain words.
+
+## 8b. Tier 4b — Relief site recommender (teammate design, 13 Nov)
+
+Goal: from before and after imagery, find open areas that stayed dry and recommend a temporary relief point on each (food, water, shelter or clinic tents), based on the need of nearby residents.
+
+1. **Candidates.** OSM parking lots, school grounds, sports pitches, parks, community centres and places of worship, at least 1,500 m².
+2. **Imagery check.** The VLM sees before and after crops of each candidate and answers: dry, mostly empty, free of debris, what changed. Result: usable, not usable or uncertain, with a reason. Uncertain goes to the review queue.
+3. **Safety and access filters.** Drop sites in a FEMA high-risk tile, lower than their surroundings (DEM), more than 50 m from a road node, or not reachable from outside over open roads (strict graph).
+4. **Need.** Residential buildings within 1.5 km network distance, weighted by tract SVI (65+, no vehicle, low income). Food need counts homes whose nearest food store is flooded or unreachable.
+5. **Selection.** Greedy maximum coverage: pick the few sites that together cover the most weighted need.
+6. **Use.** Paved lot: food or water. Large paved lot (over 5,000 m²): combined food and water. Large grass field at a school or community centre: tent shelter or mobile clinic.
+7. **Map.** Recommended sites green, uncertain amber, rejected grey. Clicking a site shows both crops, the model's reason, the checks it passed, the recommended use and the people it serves.
 
 ## 9. Tier 5 — Crowd-sourced photo verification (if time)
 
