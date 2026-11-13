@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FloodLens</title>
+  <link rel="stylesheet" href="/static/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo" aria-label="FloodLens">Flood<b>Lens</b></span>
+      <span id="event" class="event"></span>
+    </div>
+    <div id="pills" class="pills" aria-live="polite"></div>
+  </header>
+
+  <main>
+    <aside id="left" class="panel" aria-label="Map layers and legend">
+      <h3>Show on map</h3>
+      <label><input type="checkbox" data-layer="roads" checked> Road status</label>
+      <label><input type="checkbox" data-layer="zones" checked> Cut-off neighbourhoods</label>
+      <label><input type="checkbox" data-layer="facilities" checked> Facilities</label>
+      <label><input type="checkbox" data-layer="buildings"> Buildings</label>
+      <label><input type="checkbox" data-layer="post" checked> Aerial photo (30 Aug 2017)</label>
+
+      <h3>How sure</h3>
+      <div class="seg" role="group" aria-label="Zone mode">
+        <button data-mode="permissive" class="on" title="Roads the model could not see count as passable, with a penalty">Best estimate</button>
+        <button data-mode="strict" title="Only roads the model saw as open count as passable">Confirmed only</button>
+      </div>
+      <p class="note" id="modeNote"></p>
+
+      <h3>Roads</h3>
+      <div id="legend" class="legend"></div>
+      <p class="note">Each road is judged by <b id="model"></b>, comparing a 2016 photo with the 30 Aug 2017 photo. Click any road for the evidence.</p>
+      <p class="note credits">Imagery NOAA NGS (CC0), USDA NAIP. Roads and buildings © OpenStreetMap contributors (ODbL).</p>
+    </aside>
+
+    <section id="center">
+      <div id="kpis" class="kpis" aria-live="polite"></div>
+      <div id="mapwrap">
+        <div id="map-before" class="map" aria-hidden="true"></div>
+        <div id="map" class="map" role="application" aria-label="Flood map"></div>
+        <div id="swipe" class="swipe hidden" aria-hidden="true"><div class="handle" title="Drag to compare 2016 and 2017"><span>2016</span><span>2017</span></div></div>
+        <div class="maptools">
+          <button id="compareBtn" class="tool" aria-pressed="false" title="Swipe between the 2016 and 2017 photos">Compare 2016 ⇄ 2017</button>
+        </div>
+        <div id="hint" class="hint hidden" role="status"></div>
+        <div id="busy" class="busy hidden" role="status">Updating…</div>
+        <div id="guide" class="guide hidden" role="dialog" aria-labelledby="guideTitle">
+          <h2 id="guideTitle">Which streets became islands?</h2>
+          <ol>
+            <li><span class="sw blocked"></span><b>Red roads</b> were underwater on 30 Aug 2017. <span class="sw open"></span><b>Green</b> roads were dry.</li>
+            <li><span class="sw zone"></span><b>Shaded areas</b> are neighbourhoods with no dry road out. Number 1 needs help first.</li>
+            <li>Press <b>Route me out</b> and click a home to get the safest way out.</li>
+          </ol>
+          <button id="guideOk" class="primary">Show me the map</button>
+        </div>
+      </div>
+    </section>
+
+    <aside id="right" class="panel" aria-label="Actions">
+      <div class="tabs" role="tablist">
+        <button data-tab="zones" class="on" role="tab">Cut off</button>
+        <button data-tab="review" role="tab">Check roads <span id="nreview" class="badge"></span></button>
+      </div>
+      <div id="tab-zones">
+        <button id="routeBtn" class="primary">Route me out</button>
+        <div id="zones"></div>
+        <h4>Facilities</h4>
+        <div id="facilities"></div>
+      </div>
+      <div id="tab-review" class="hidden">
+        <p class="note">Confirm or correct the model. Keys: <kbd>O</kbd> open, <kbd>B</kbd> blocked, <kbd>→</kbd> next.</p>
+        <div class="seg small" role="group" aria-label="Review filter">
+          <button data-rf="blocked" class="on">Blocked</button><button data-rf="uncertain">Unsure</button><button data-rf="open">Open</button>
+        </div>
+        <div id="review"></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer id="evidence" class="collapsed" aria-live="polite">
+    <div class="ev-head"><span id="ev-title">Click a road, a neighbourhood or a route to see the evidence</span><button id="ev-close" aria-label="Close evidence panel">×</button></div>
+    <div id="ev-body"></div>
+  </footer>
+
+  <script src="/static/vendor/maplibre-gl.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

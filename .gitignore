@@ -1,0 +1,31 @@
+# secrets
+.env
+
+# large or generated data (images, rasters, chips, caches, model outputs)
+data/
+cache/
+*.tif
+*.tiff
+*.vrt
+*.graphml
+*.parquet
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.zip
+*.tar
+*.tar.gz
+
+# environments and tooling
+.venv/
+venv/
+.tools/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.DS_Store
+
+# full run logs stay local, error reports in ops/ are tracked
+logs/

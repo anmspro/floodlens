@@ -1,0 +1,54 @@
+# FloodLens configuration. Paths are relative to the repo root.
+
+event:
+  name: "Hurricane Harvey, Addicks and Barker (West Houston)"
+  date: "2017-08-30"          # date of the NOAA after imagery
+  before_date: "2016 (USDA NAIP)"
+
+dataset:
+  hf_base_url: "https://huggingface.co/datasets/jennifer-fowler/UTSA-flood-images/resolve/main"
+  dir: "data/raw/Texas_Flood_Student_Data"
+
+aoi:
+  name: "addicks_north"
+  # west, south, east, north (WGS84). This is the 5 x 5 block of zoom-16 tiles
+  # x 15352-15356, y 27071-27075 in the West Houston / Addicks and Barker set.
+  bbox: [-95.6689453, 29.8215827, -95.6414795, 29.8454086]
+  locality_prefix: "West Houston"
+
+imagery:
+  # organizer = organizer PNG tiles + WGS84 bounds, written to GeoTIFF (EPSG:3857)
+  # geotiff   = use your own GeoTIFFs from the globs below (any CRS, reprojected)
+  source: "organizer"
+  pre_glob: "data/raw/imagery/pre/*.tif"
+  post_glob: "data/raw/imagery/post/*.tif"
+  web_overlay_px: 1024
+
+roads:
+  max_segment_m: 100
+  split_if_longer_than_m: 120
+  chip_buffer_m: 20
+  chip_min_side_m: 80
+  chip_px: 448
+
+vlm:
+  model: "qwen3-vl-8b-instruct"
+  prompt_id: "roads_v2"
+
+thresholds:
+  road:
+    blocked_min_conf: 0.6
+    open_min_conf: 0.6
+
+limits:
+  max_road_segments: 1500
+
+routing:
+  uncertain_penalty: 4.0
+  exit_buffer_m: 50
+
+cutoff:
+  min_buildings: 3
+
+population:
+  persons_per_building: 2.5

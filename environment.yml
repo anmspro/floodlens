@@ -1,0 +1,26 @@
+# conda-forge environment. PyPI (pypi.org) is blocked on the event Wi-Fi,
+# conda-forge works. Create with:
+#   conda env create -f environment.yml      (or micromamba create -f environment.yml)
+name: floodlens
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - numpy
+  - pillow
+  - rasterio
+  - shapely>=2
+  - pyproj
+  - geopandas
+  - osmnx>=2
+  - networkx
+  - fastapi
+  - uvicorn
+  - typer
+  - pyyaml
+  - python-dotenv
+  - openai
+  - httpx
+  - pydantic>=2
+  - pytest
