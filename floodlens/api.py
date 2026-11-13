@@ -17,7 +17,8 @@ BASE = get_settings()
 app = FastAPI(title="FloodLens")
 LOCK = threading.Lock()
 LAYERS = {"road_segments", "road_edges", "buildings", "facilities", "cutoff_zones_strict", "cutoff_zones_permissive",
-          "coverage", "context_warnings", "context_tracts", "impact_buildings", "impact_fields", "relief_sites"}
+          "coverage", "context_warnings", "context_tracts", "impact_buildings", "impact_fields", "relief_sites",
+          "sa_crossings", "sa_sensors", "context_reports"}
 HIGHWAY_RANK = {"primary": 0, "secondary": 1, "tertiary": 2, "unclassified": 3, "residential": 4}
 
 for mount, path in (("/static", ROOT / "web"), ("/chips", BASE.data / "chips"), ("/tiles", BASE.data / "tiles")):
@@ -107,6 +108,17 @@ def relief(area_id: str):
     s = area(area_id)
     p = s.derived / "relief.json"
     return json.loads(p.read_text()) if p.exists() else None
+
+
+@app.get("/api/{area_id}/area-context")
+def area_context(area_id: str):
+    """River gauges and county flood-zone homes for the area (snapshots)."""
+    s = area(area_id)
+    out = {}
+    for key, name in (("gauges", "context_gauges.json"), ("county", "context_county.json")):
+        p = s.derived / name
+        out[key] = json.loads(p.read_text()) if p.exists() else None
+    return out
 
 
 @app.get("/api/{area_id}/review")

@@ -15,6 +15,11 @@ events:
     before_label: null
     window: ["2025-07-03", "2025-07-23"]
     nws_offices: ["EWX"]
+  san_antonio_crossings:
+    name: "Heavy-rain scenario: every low-water crossing floods"
+    before_label: null
+    window: ["2025-06-11", "2025-06-13"]   # NWS warnings of the deadly 12 June 2025 San Antonio flash flood, as context
+    nws_offices: ["EWX"]
 
 # Every area the organizer dataset covers. Tiles are selected by `locality`.
 # mode: pair = before/after pairs, after_only = no before image exists.
@@ -51,6 +56,12 @@ areas:
     mode: after_only
     localities: ["Hunt / Guadalupe River", "Ingram / Guadalupe River", "Kerrville / Guadalupe River",
                  "Center Point / Guadalupe River", "Comfort / Guadalupe River"]
+
+  san_antonio:
+    name: "San Antonio: low-water crossings (scenario)"
+    event: san_antonio_crossings
+    mode: scenario
+    localities: []
 
 imagery:
   tile_format: "webp"     # web map tiles cut from the GeoTIFFs

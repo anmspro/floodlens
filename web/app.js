@@ -112,7 +112,7 @@ function setImagery1(m, epoch, below) {
 
 function addStaticLayers() {
   const add = (id, spec) => { map.addSource(id, { type: "geojson", data: empty(), ...(spec.promote ? { promoteId: "id" } : {}) }); };
-  ["warnings", "buildings", "zones", "impact", "relief", "roads", "naive", "route", "facilities"].forEach((id) => add(id, { promote: ["zones", "roads", "relief"].includes(id) }));
+  ["warnings", "buildings", "zones", "impact", "relief", "roads", "naive", "route", "facilities", "reports", "crossings", "sensors"].forEach((id) => add(id, { promote: ["zones", "roads", "relief"].includes(id) }));
   map.addLayer({ id: "warnings", type: "line", source: "warnings", layout: { visibility: "none" }, paint: { "line-color": "#7b2cbf", "line-width": 2, "line-dasharray": [3, 2] } });
   map.addLayer({ id: "buildings", type: "fill", source: "buildings", layout: { visibility: "none" },
     paint: { "fill-color": ["case", ["to-boolean", ["get", "zone_id"]], "#d7263d", "#34495e"], "fill-opacity": 0.35 } });
@@ -139,6 +139,12 @@ function addStaticLayers() {
   map.addLayer({ id: "naive", type: "line", source: "naive", paint: { "line-color": "#374151", "line-width": 4, "line-dasharray": [1.5, 1.5], "line-opacity": 0.9 } });
   map.addLayer({ id: "route-casing", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#fff", "line-width": 10 } });
   map.addLayer({ id: "route", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#1e64c8", "line-width": 6 } });
+  map.addLayer({ id: "reports", type: "circle", source: "reports", paint: { "circle-radius": 6, "circle-color": "#7b2cbf",
+    "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+  map.addLayer({ id: "crossings", type: "circle", source: "crossings", paint: { "circle-radius": 7, "circle-color": "#0b6e99",
+    "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+  map.addLayer({ id: "sensors", type: "circle", source: "sensors", paint: { "circle-radius": 6, "circle-color": "#f39c12",
+    "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
   map.addLayer({ id: "facilities", type: "circle", source: "facilities", paint: {
     "circle-radius": 8, "circle-color": ["match", ["get", "kind"], ...Object.entries(FAC_COLORS).flat(), "#555"],
     "circle-stroke-width": 3, "circle-stroke-color": ["case", ["==", ["get", "reachable"], false], "#d7263d", "#ffffff"] } });
@@ -155,13 +161,17 @@ async function refresh(first = false) {
     map.getSource("roads").setData(segs); map.getSource("facilities").setData(fac);
     map.getSource("zones").setData(state.zones[state.mode]);
     if (first) {
-      const [blds, warn, imp, sites, impact, relief] = await Promise.all([
+      const [blds, warn, imp, sites, impact, relief, reports, cross, sens, actx] = await Promise.all([
         api(A("/layers/buildings")), api(A("/layers/context_warnings")), api(A("/layers/impact_buildings")),
-        api(A("/layers/relief_sites")), api(A("/impact")), api(A("/relief"))]);
+        api(A("/layers/relief_sites")), api(A("/impact")), api(A("/relief")), api(A("/layers/context_reports")),
+        api(A("/layers/sa_crossings")), api(A("/layers/sa_sensors")), api(A("/area-context"))]);
+      map.getSource("reports").setData(reports); map.getSource("crossings").setData(cross); map.getSource("sensors").setData(sens);
+      state.actx = actx;
+      document.querySelectorAll(".sa-only").forEach((el) => el.classList.toggle("hidden", !cross.features.length));
       map.getSource("buildings").setData(blds); map.getSource("warnings").setData(warn);
       map.getSource("impact").setData(imp); map.getSource("relief").setData(sites);
       Object.assign(state, { impact, relief, sites });
-      renderImpact(); renderRelief();
+      renderImpact(); renderAreaContextOnly(); renderRelief();
     } else map.getSource("buildings").setData(await api(A("/layers/buildings")));
     renderKpis(); renderLegend(); renderZones(); renderMarkers(); renderFacilities(); await renderReview();
   } finally { busy(false); }
@@ -270,8 +280,18 @@ function renderImpact() {
     <table class="kv"><tr><td>What the model saw</td><td>Homes</td><td>Damage ratio</td></tr>${classRows}</table>
     <p class="note">${esc(im.model)} checked a random sample of ${h.sampled} homes on before and after crops. Damage ratios: ${esc(h.damage_ratios?.source)}. Values: ${esc(h.home_value_source)}. Totals scale the sample to all ${fmt(h.residential_buildings)} homes in the photos.</p>
     ${ins.n_claims ? `<p class="note">Check: ${fmt(ins.n_claims)} NFIP flood insurance claims in these counties during the event reported ${usd(ins.building_damage_usd)} of building damage (${esc(ins.scope)}).${ins.tract_spearman_vs_estimate !== null ? ` Rank correlation with our estimate across ${ins.tracts_compared} tracts: ${ins.tract_spearman_vs_estimate}.` : ""}</p>` : ""}
-    <p class="note"><b>Estimate, not an appraisal.</b> Use it to compare areas, not to settle claims.</p>`;
+    <p class="note"><b>Estimate, not an appraisal.</b> Use it to compare areas, not to settle claims.</p>${areaContextHtml()}`;
 }
+function areaContextHtml() {
+  const c = state.actx || {}, g = c.gauges?.gauges || [], cty = c.county?.counties || [];
+  let h = "";
+  if (cty.length) h += `<h4>County flood insurance gap</h4>` + cty.map((r) => `<div class="card"><b>${esc(r.county)} County</b>
+    <div class="m">${fmt(r.residential_structures_in_sfha)} homes in FEMA flood zones (${r.share_in_sfha_pct}%), only ${r.nfip_takeup_in_sfha_pct}% of them insured by NFIP</div></div>`).join("");
+  if (g.length) h += `<h4>River gauges during the event</h4><table class="kv"><tr><td>Gauge</td><td>Peak vs flood stage</td></tr>` +
+    g.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.peak_stage} ${esc(x.unit || "")}${x.flood_stage ? ` vs ${x.flood_stage}` : ""}${x.above_flood_stage_on_photo_day ? " · <b>above flood stage on photo day</b>" : ""}</td></tr>`).join("") + `</table>`;
+  return h;
+}
+function renderAreaContextOnly() { if (!state.impact) $("#impact").innerHTML = `<p class="empty">Impact is not estimated for this area.</p>${areaContextHtml()}`; }
 
 async function renderReview() {
   state.review = await api(A(`/review?status=${state.rf}&limit=80`));
@@ -433,8 +453,10 @@ function wireMap() {
   map.on("mouseleave", "zones-fill", () => { if (zHover) highlightZone(zHover, false); zHover = null; });
   map.on("click", (e) => {
     if (state.routing) return routeFrom(e.lngLat);
-    const layers = ["roads", "relief-fill", "impact", "facilities", "zones-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const layers = ["reports", "crossings", "sensors", "roads", "relief-fill", "impact", "facilities", "zones-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hit = map.queryRenderedFeatures(e.point, { layers });
+    const pt = hit.find((h) => ["reports", "crossings", "sensors"].includes(h.layer.id));
+    if (pt) return showPoint(pt.layer.id, pt.properties);
     const road = hit.find((h) => h.layer.id === "roads");
     if (road && road.properties.status !== "outside") return showSegment(road.properties.id);
     const site = hit.find((h) => h.layer.id === "relief-fill");
@@ -444,6 +466,23 @@ function wireMap() {
     const z = hit.find((h) => h.layer.id === "zones-fill");
     if (z) showZone(z.properties.id);
   });
+}
+
+function showPoint(kind, p) {
+  $("#evidence").classList.remove("collapsed"); $("#ev-body").classList.add("one");
+  if (kind === "reports") {
+    $("#ev-title").textContent = `NOAA storm report: ${p.type} · ${p.date}`;
+    $("#ev-body").innerHTML = `<div><p>${esc(p.place || "")}${p.county ? `, ${esc(p.county)} County` : ""}</p>
+      <p class="reason">${esc(p.narrative || "No narrative.")}</p><p class="m">Deaths ${fmt(Number(p.deaths))} · reported property damage ${usd(Number(p.damage_usd))}. Source: NOAA NCEI Storm Events.</p></div>`;
+  } else if (kind === "crossings") {
+    $("#ev-title").textContent = `Low-water crossing: ${p.name || ""}`;
+    $("#ev-body").innerHTML = `<div><p>In the heavy-rain scenario this crossing is closed. Neighbourhoods that can only leave across it show as cut off.</p><p class="m">City of San Antonio low-water crossing ${esc(p.id)}.</p></div>`;
+  } else {
+    $("#ev-title").textContent = `SmartSA flood sensor (${p.zone})`;
+    $("#ev-body").innerHTML = `<div><table class="kv"><tr><td>Readings</td><td>${fmt(Number(p.readings))} from ${esc(String(p.first).slice(0, 10))} to ${esc(String(p.last).slice(0, 10))}</td></tr>
+      <tr><td>Alerts triggered</td><td>${fmt(Number(p.alerts))}</td></tr><tr><td>Largest water rise</td><td>${p.max_rise_m ?? "–"} m</td></tr>
+      <tr><td>Last status</td><td>${esc(p.status_last)}</td></tr></table></div>`;
+  }
 }
 
 function showHome(p) {
@@ -532,7 +571,8 @@ document.addEventListener("keydown", (e) => {
 document.querySelectorAll("[data-layer]").forEach((cb) => cb.addEventListener("change", () => {
   const vis = cb.checked ? "visible" : "none";
   const ids = { post: ["img"], roads: ["roads", "roads-casing", "roads-dash"], zones: ["zones-fill", "zones-line"], facilities: ["facilities"],
-    buildings: ["buildings"], relief: ["relief-fill", "relief-line"], impact: ["impact"], warnings: ["warnings"] }[cb.dataset.layer];
+    buildings: ["buildings"], relief: ["relief-fill", "relief-line"], impact: ["impact"], warnings: ["warnings"],
+    reports: ["reports"], crossings: ["crossings"], sensors: ["sensors"] }[cb.dataset.layer];
   ids.forEach((id) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", vis));
   if (cb.dataset.layer === "zones") state.markers.forEach((m) => (m.getElement().style.display = cb.checked ? "" : "none"));
 }));

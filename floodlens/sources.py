@@ -189,9 +189,111 @@ def fetch_elevation(s: Settings, log=print) -> Path:
     return out / "dem.tif"
 
 
+HF_SENTINEL = "https://huggingface.co/datasets/Ymx1025/floodsentinel/resolve/main"
+STORM_FILES = {2016: "StormEvents_details-ftp_v1.0_d2016_c20260323.csv.gz", 2017: "StormEvents_details-ftp_v1.0_d2017_c20260519.csv.gz",
+               2018: "StormEvents_details-ftp_v1.0_d2018_c20260323.csv.gz", 2019: "StormEvents_details-ftp_v1.0_d2019_c20260323.csv.gz",
+               2020: "StormEvents_details-ftp_v1.0_d2020_c20260323.csv.gz", 2021: "StormEvents_details-ftp_v1.0_d2021_c20260323.csv.gz",
+               2022: "StormEvents_details-ftp_v1.0_d2022_c20260625.csv.gz", 2023: "StormEvents_details-ftp_v1.0_d2023_c20260323.csv.gz",
+               2024: "StormEvents_details-ftp_v1.0_d2024_c20260728.csv.gz"}
+SENTINEL_COUNTY = {"48201": "corpus/harris_harvey_2017.json"}
+FLOOD_HOMES_URL = "https://huggingface.co/datasets/DreamyLeadsResearch/flood-zone-homes-by-county-2026/resolve/main/flood-zone-homes-by-county-2026.csv"
+
+
+def _money(v) -> float:
+    v = str(v or "").strip().upper()
+    if not v or v == "NAN":
+        return 0.0
+    mult = {"K": 1e3, "M": 1e6, "B": 1e9}.get(v[-1], 1)
+    try:
+        return float(v.rstrip("KMB") or 0) * mult
+    except ValueError:
+        return 0.0
+
+
+def _area_counties(s: Settings) -> list[str]:
+    import pandas as pd
+    m = pd.read_csv(s.dataset_dir / "image_metadata.csv", dtype="string", keep_default_na=False)
+    locs = s.area.get("localities") or []
+    c = sorted(set(m[m.locality.isin(locs)].county_geoid) - {""})
+    return c or (["48029"] if s.area_id == "san_antonio" else [])
+
+
+def fetch_storm_reports(s: Settings, log=print) -> Path | None:
+    """NOAA Storm Events flood reports during the event window within 10 km of the area."""
+    import geopandas as gpd
+    import pandas as pd
+    from shapely.geometry import Point
+    from floodlens.osm import coverage
+    a, b = s.event["window"]
+    year = int(a[:4])
+    if year not in STORM_FILES:
+        log(f"[{s.area_id}] no Storm Events file for {year}")
+        return None
+    fp = _download_once(s, f"{HF_SENTINEL}/storm_events/{STORM_FILES[year]}", f"stormevents_{year}.csv.gz")
+    d = pd.read_csv(fp, low_memory=False)
+    d = d[(d.STATE == "TEXAS") & d.EVENT_TYPE.isin(["Flood", "Flash Flood", "Heavy Rain"]) & d.BEGIN_LAT.notna()]
+    day = pd.to_datetime(d.BEGIN_YEARMONTH.astype(str) + d.BEGIN_DAY.astype(str).str.zfill(2), format="%Y%m%d")
+    d = d[(day >= a) & (day <= b)]
+    cov = coverage(s, 10000)
+    g = gpd.GeoDataFrame(d, geometry=[Point(x, y) for x, y in zip(d.BEGIN_LON, d.BEGIN_LAT)], crs=WGS84)
+    g = g[g.within(cov)]
+    out = gpd.GeoDataFrame({
+        "type": g.EVENT_TYPE, "date": g.BEGIN_DATE_TIME, "county": g.CZ_NAME, "place": g.BEGIN_LOCATION,
+        "deaths": g.DEATHS_DIRECT.fillna(0).astype(int) + g.DEATHS_INDIRECT.fillna(0).astype(int),
+        "damage_usd": [_money(v) for v in g.DAMAGE_PROPERTY],
+        "narrative": g.EVENT_NARRATIVE.fillna("").astype(str).str.slice(0, 600)}, geometry=g.geometry, crs=WGS84)
+    o = snap_dir(s)
+    o.mkdir(parents=True, exist_ok=True)
+    out.to_file(o / "storm_reports.geojson", driver="GeoJSON")
+    log(f"[{s.area_id}] Storm Events flood reports nearby: {len(out)}")
+    return o / "storm_reports.geojson"
+
+
+def fetch_gauges(s: Settings, log=print) -> Path | None:
+    """FloodSentinel 15-minute river gauge series for the area's county, summarised per gauge."""
+    files = [SENTINEL_COUNTY[c] for c in _area_counties(s) if c in SENTINEL_COUNTY]
+    if not files or s.event.get("name") != "Hurricane Harvey":
+        return None
+    rows = []
+    for rel in files:
+        fp = _download_once(s, f"{HF_SENTINEL}/{rel}", "floodsentinel_" + Path(rel).name)
+        js = json.loads(fp.read_text())
+        dates = set(s.area_info.get("after_dates", []))
+        for site in js["sites"]:
+            obs = [o for o in site.get("observations", []) if o.get("stage") is not None]
+            if not obs:
+                continue
+            peak = max(obs, key=lambda o: o["stage"])
+            on_photo = [o["stage"] for o in obs if o["t"][:10] in dates]
+            fs = site.get("flood_stage")
+            rows.append({"site_no": site["site_no"], "name": site["name"], "unit": site.get("stage_unit"),
+                         "flood_stage": fs, "major_stage": site.get("major_stage"), "peak_stage": peak["stage"], "peak_time": peak["t"],
+                         "stage_on_photo_day": max(on_photo) if on_photo else None,
+                         "above_flood_stage_on_photo_day": (max(on_photo) >= fs) if (on_photo and fs) else None,
+                         "series": [[o["t"], o["stage"]] for o in obs[::8]]})
+    o = snap_dir(s)
+    o.mkdir(parents=True, exist_ok=True)
+    (o / "gauges.json").write_text(json.dumps({"fetched_at": now_iso(), "source": "FloodSentinel (USGS NWIS IV)", "gauges": rows}))
+    log(f"[{s.area_id}] river gauges: {len(rows)}")
+    return o / "gauges.json"
+
+
+def fetch_county_homes(s: Settings, log=print) -> Path | None:
+    import pandas as pd
+    fp = _download_once(s, FLOOD_HOMES_URL, "flood_zone_homes_by_county_2026.csv")
+    d = pd.read_csv(fp, dtype={"fips": str})
+    rows = d[d.fips.isin(_area_counties(s))].to_dict("records")
+    o = snap_dir(s)
+    o.mkdir(parents=True, exist_ok=True)
+    (o / "county_homes.json").write_text(json.dumps({"fetched_at": now_iso(), "counties": rows}, default=str))
+    log(f"[{s.area_id}] county flood-zone homes rows: {len(rows)}")
+    return o / "county_homes.json"
+
+
 def fetch_all(s: Settings, log=print) -> dict:
     out = {}
-    for name, fn in (("svi", fetch_svi), ("nws_history", fetch_nws_history), ("elevation", fetch_elevation)):
+    for name, fn in (("svi", fetch_svi), ("nws_history", fetch_nws_history), ("elevation", fetch_elevation),
+                     ("storm_reports", fetch_storm_reports), ("gauges", fetch_gauges), ("county_homes", fetch_county_homes)):
         try:
             out[name] = str(fn(s, log))
         except Exception as e:  # noqa: BLE001
@@ -202,7 +304,9 @@ def fetch_all(s: Settings, log=print) -> dict:
     except Exception as e:  # noqa: BLE001
         out["nws_live"] = f"FAILED: {e}"
     # copy context layers for the map
-    for src, dst in (("tracts_svi.geojson", "context_tracts.geojson"), ("nws_warnings.geojson", "context_warnings.geojson")):
+    for src, dst in (("tracts_svi.geojson", "context_tracts.geojson"), ("nws_warnings.geojson", "context_warnings.geojson"),
+                     ("storm_reports.geojson", "context_reports.geojson"), ("gauges.json", "context_gauges.json"),
+                     ("county_homes.json", "context_county.json")):
         p = snap_dir(s) / src
         if p.exists():
             (s.derived / dst).write_text(p.read_text())

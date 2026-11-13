@@ -197,6 +197,25 @@ def relief(area: str = AREA):
         rl.run(s)
 
 
+@app.command("sa-fetch")
+@logged
+def sa_fetch(area: str = typer.Option("san_antonio", "--area", "-a")):
+    """San Antonio: low-water crossings + SmartSA flood sensors, coverage = 1 km around crossings."""
+    from floodlens import sa
+    sa.fetch(get_settings().for_area(area))
+
+
+@app.command("sa-scenario")
+@logged
+def sa_scenario(area: str = typer.Option("san_antonio", "--area", "-a"), scenario: str = "all_crossings_flooded"):
+    """San Antonio: close every low-water crossing (or 'none' to reopen), then run analyze."""
+    from floodlens import sa
+    from floodlens.analysis import Network
+    s = get_settings().for_area(area)
+    sa.apply_scenario(s, scenario)
+    print(Network(s).run())
+
+
 @app.command("prefetch-briefs")
 @logged
 def prefetch_briefs(area: str = AREA, top: int = 5):
@@ -222,7 +241,9 @@ def offline_check(area: str = AREA):
             "relief.json", "relief_sites.geojson", "context_tracts.geojson", "context_warnings.geojson"]
     ok_all = True
     for s in areas(area):
-        missing = [f for f in need if not (s.derived / f).exists()]
+        scen = s.area.get("mode") == "scenario"
+        need_here = [f for f in need if not (scen and (f.startswith(("impact", "relief", "web_tiles")) or f == "tiles.csv"))]
+        missing = [f for f in need_here if not (s.derived / f).exists()]
         segs = (s.derived / "road_segments.geojson")
         n_chips = len(list((s.chips / "roads").glob("*_post.jpg"))) if (s.chips / "roads").exists() else 0
         n_tiles = sum(1 for _ in s.tiles.rglob("*.webp")) if s.tiles.exists() else 0
@@ -232,7 +253,7 @@ def offline_check(area: str = AREA):
         if segs.exists():
             import json as _j
             pending = sum(1 for f in _j.loads(segs.read_text())["features"] if f["properties"]["status"] == "pending")
-        ok = not missing and n_tiles > 0 and pending == 0
+        ok = not missing and (n_tiles > 0 or scen) and pending == 0
         ok_all &= ok
         print(f"[{'OK ' if ok else 'GAP'}] {s.area_id}: map tiles {n_tiles}, road crops {n_chips}, saved briefs {briefs}, "
               f"unlabelled roads {pending}, context snapshots {len(snaps)}" + (f"\n      missing: {', '.join(missing)}" if missing else ""))

@@ -189,6 +189,9 @@ async def _label_all(s: Settings, todo: list[dict], feats: list[dict], log) -> d
 
 
 def label_roads(s: Settings, force: bool = False, limit: int | None = None, log=print) -> dict:
+    if s.area.get("mode") == "scenario":
+        log(f"[{s.area_id}] scenario area: no photos to label")
+        return {}
     feats = read_geojson(seg_path(s))
     todo = []
     for f in sorted(feats, key=_order_key):
