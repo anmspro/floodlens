@@ -70,3 +70,5 @@
 | 20261113T204345Z | label kingwood | ok | 127.2s | 68bc20c | RR191131IP01 |  |
 | 20261113T204552Z | fetch-context kingwood | ok | 16.4s | 68bc20c | RR191131IP01 |  |
 | 20261113T204609Z | analyze kingwood | ok | 2.9s | 68bc20c | RR191131IP01 |  |
+| 20261113T205019Z | prefetch-briefs west_houston | ok | 18.2s | ef54c1f | RR191131IP01 |  |
+| 20261113T205037Z | prefetch-briefs bevil_oaks | ok | 17.6s | ef54c1f | RR191131IP01 |  |
