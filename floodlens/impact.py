@@ -90,23 +90,23 @@ def nfip_claims(s: Settings, log=print) -> list[dict]:
         skip = 0
         while True:
             q = {"$filter": f"countyCode eq '{cc}' and dateOfLoss ge '{a}' and dateOfLoss le '{b}'",
-                 "$select": fields, "$top": "10000", "$skip": str(skip)}
+                 "$select": fields, "$top": "2000", "$skip": str(skip)}
             body = None
             for attempt in range(4):
                 try:
                     body = json.loads(_http(NFIP_URL + "?" + urllib.parse.urlencode(q), timeout=240, binary=False))
                     break
                 except Exception as e:  # noqa: BLE001  OpenFEMA returns 503 under load
-                    log(f"[{s.area_id}] NFIP county {cc} page {skip // 10000}: {type(e).__name__}, retrying")
+                    log(f"[{s.area_id}] NFIP county {cc} page {skip // 2000}: {type(e).__name__}, retrying")
                     import time as _t
                     _t.sleep(15 * (attempt + 1))
             if body is None:
                 raise RuntimeError(f"NFIP county {cc} failed after retries")
             rows = body.get("NfipClaims", [])
             claims += rows
-            if len(rows) < 10000:
+            if len(rows) < 2000:
                 break
-            skip += 10000
+            skip += 2000
         log(f"[{s.area_id}] NFIP claims county {cc}: {sum(1 for c in claims if c.get('countyCode') == cc)}")
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"fetched_at": now_iso(), "source": "OpenFEMA NfipClaims v3", "claims": claims}))

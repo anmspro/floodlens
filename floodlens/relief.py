@@ -140,20 +140,27 @@ def run(s: Settings, log=print) -> dict:
         bp = net.bpop.get(b["properties"]["id"])
         if bp:
             people[b["properties"]["node_id"]] += bp["est_pop"]
+    from shapely.strtree import STRtree
+    seg_geoms = [reproject_geom(geom_of(sf), WGS84, net.utm) for sf in net.segs]
+    seg_tree = STRtree(seg_geoms)
     feats, cover = [], {}
     for f in cands:
         p = f["properties"]
         c = checks.get(p["id"])
         g = geom_of(f)
-        cu = reproject_geom(g.centroid, WGS84, net.utm)
-        node = nearest_nodes(xy, ids, np.array([[cu.x, cu.y]]))[0]
-        d_road = float(((xy[ids.index(node)] - np.array([cu.x, cu.y])) ** 2).sum() ** 0.5)
+        g_utm = reproject_geom(g, WGS84, net.utm)
+        k = int(seg_tree.nearest(g_utm))
+        d_road = float(seg_geoms[k].distance(g_utm))     # site edge to the nearest road
+        a_, b_, _ = net.segs[k]["properties"]["edge_id"].split("_")
+        cu = g_utm.centroid
+        cand_nodes = [int(a_), int(b_)]
+        node = min(cand_nodes, key=lambda n: (xy[ids.index(n)][0] - cu.x) ** 2 + (xy[ids.index(n)][1] - cu.y) ** 2)
         lab = (c or {}).get("label") or {}
         rel = _relative_elevation(s, g.centroid.x, g.centroid.y, dem) if dem.exists() else None
         checks_list = [
             ("Photo check", "pass" if lab.get("usable") == "usable" else "fail" if lab.get("usable") == "not_usable" else "warn",
              lab.get("reason") or ("no photo" if not c else "")),
-            ("Road access (nearest road node)", "pass" if d_road <= 120 else "fail", f"{round(d_road)} m from the road network edge node"),
+            ("Next to a road", "pass" if d_road <= 40 else "fail", f"{round(d_road)} m from the nearest road"),
             ("Truck access over confirmed-dry roads", "pass" if comp.get(node) in exit_comps else "warn" if node in W else "fail",
              "reachable from outside" if comp.get(node) in exit_comps else "only over roads the model could not confirm"),
             ("Not lower than surroundings", ("fail" if rel["relative_m"] < -0.5 else "pass") if rel else "warn",

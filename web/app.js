@@ -26,6 +26,11 @@ async function api(path, opts) {
 const A = (p) => `/api/${state.area}${p}`;
 const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 function busy(on) { $("#busy").classList.toggle("hidden", !on); }
+const THEMES = ["auto", "light", "dark"];
+function applyTheme(th) {
+  if (th === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", th);
+  const b = document.getElementById("themeBtn"); if (b) b.textContent = `Theme: ${th}`;
+}
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
 const empty = () => ({ type: "FeatureCollection", features: [] });
 
@@ -587,6 +592,11 @@ document.querySelectorAll("[data-layer]").forEach((cb) => cb.addEventListener("c
   if (cb.dataset.layer === "zones") state.markers.forEach((m) => (m.getElement().style.display = cb.checked ? "" : "none"));
 }));
 $("#areaSel").addEventListener("change", (e) => loadArea(e.target.value));
+applyTheme(store.get("floodlens.theme") || "auto");
+$("#themeBtn").addEventListener("click", () => {
+  const cur = store.get("floodlens.theme") || "auto", next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
+  store.set("floodlens.theme", next); applyTheme(next);
+});
 $("#reviewer").value = store.get("floodlens.reviewer") || "";
 $("#reviewer").addEventListener("change", (e) => store.set("floodlens.reviewer", e.target.value.trim()));
 $("#routeBtn").addEventListener("click", () => {
