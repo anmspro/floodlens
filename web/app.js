@@ -5,6 +5,7 @@ const FAC_COLORS = { hospital: "#c0392b", clinic: "#e67e22", nursing_home: "#8e4
   fire_station: "#d35400", police: "#34495e", school: "#2980b9", shelter: "#16a085" };
 const IMPACT_COLORS = { none: "#1f9d55", partial: "#f4d03f", surrounded: "#c0392b", hidden: "#9aa0a6", hidden_on_flooded_road: "#e67e22", unknown: "#9aa0a6",
   intact: "#1f9d55", debris_around: "#f4d03f", water_around: "#e67e22", damaged: "#c0392b", destroyed: "#641e16" };
+const SVC_COLORS = { "Hospital": "#e11d48", "Urgent care": "#f97316", "Clinic": "#f472b6", "Fire station": "#ea580c", "Police": "#1d4ed8", "Ambulance (EMS)": "#7c3aed" };
 const SITE_COLORS = { recommended: "#1f9d55", ok: "#7dcea0", uncertain: "#f4a261", rejected: "#9aa0a6" };
 const MODE_NOTE = {
   permissive: "Roads we have no photo for count as passable but cost more. Use this to plan.",
@@ -127,7 +128,7 @@ function setImagery1(m, epoch, below) {
 
 function addStaticLayers() {
   const add = (id, spec) => { map.addSource(id, { type: "geojson", data: empty(), ...(spec.promote ? { promoteId: "id" } : {}) }); };
-  ["warnings", "buildings", "zones", "impact", "relief", "roads", "naive", "route", "facilities", "reports", "crossings", "sensors"].forEach((id) => add(id, { promote: ["zones", "roads", "relief"].includes(id) }));
+  ["warnings", "buildings", "zones", "impact", "relief", "roads", "naive", "route", "facilities", "reports", "crossings", "sensors", "services"].forEach((id) => add(id, { promote: ["zones", "roads", "relief"].includes(id) }));
   map.addLayer({ id: "warnings", type: "line", source: "warnings", layout: { visibility: "none" }, paint: { "line-color": "#7b2cbf", "line-width": 2, "line-dasharray": [3, 2] } });
   map.addLayer({ id: "buildings", type: "fill", source: "buildings", layout: { visibility: "none" },
     paint: { "fill-color": ["case", ["to-boolean", ["get", "zone_id"]], "#d7263d", "#34495e"], "fill-opacity": 0.35 } });
@@ -160,6 +161,9 @@ function addStaticLayers() {
     "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
   map.addLayer({ id: "sensors", type: "circle", source: "sensors", paint: { "circle-radius": 6, "circle-color": "#f39c12",
     "circle-stroke-width": 2, "circle-stroke-color": "#fff" } });
+  map.addLayer({ id: "services", type: "circle", source: "services", paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 4, 16, 8], "circle-color": ["match", ["get", "kind"], ...Object.entries(SVC_COLORS).flat(), "#64748b"],
+    "circle-stroke-width": 2, "circle-stroke-color": ["match", ["get", "status"], "cut off", "#d7263d", "#ffffff"] } });
   map.addLayer({ id: "facilities", type: "circle", source: "facilities", paint: {
     "circle-radius": 8, "circle-color": ["match", ["get", "kind"], ...Object.entries(FAC_COLORS).flat(), "#555"],
     "circle-stroke-width": 3, "circle-stroke-color": ["case", ["==", ["get", "reachable"], false], "#d7263d", "#ffffff"] } });
@@ -176,12 +180,14 @@ async function refresh(first = false) {
     map.getSource("roads").setData(segs); map.getSource("facilities").setData(fac);
     map.getSource("zones").setData(state.zones[state.mode]);
     if (first) {
-      const [blds, warn, imp, sites, impact, relief, reports, cross, sens, actx] = await Promise.all([
+      const [blds, warn, imp, sites, impact, relief, reports, cross, sens, actx, svcs] = await Promise.all([
         api(A("/layers/buildings")), api(A("/layers/context_warnings")), api(A("/layers/impact_buildings")),
         api(A("/layers/relief_sites")), api(A("/impact")), api(A("/relief")), api(A("/layers/context_reports")),
-        api(A("/layers/sa_crossings")), api(A("/layers/sa_sensors")), api(A("/area-context"))]);
+        api(A("/layers/sa_crossings")), api(A("/layers/sa_sensors")), api(A("/area-context")), api(A("/services")).catch(() => [])]);
       map.getSource("reports").setData(reports); map.getSource("crossings").setData(cross); map.getSource("sensors").setData(sens);
-      state.actx = actx;
+      state.actx = actx; state.services = svcs;
+      map.getSource("services").setData({ type: "FeatureCollection", features: svcs.map((v) => ({ type: "Feature",
+        geometry: { type: "Point", coordinates: [v.lon, v.lat] }, properties: v })) });
       document.querySelectorAll(".sa-only").forEach((el) => el.classList.toggle("hidden", !cross.features.length));
       map.getSource("buildings").setData(blds); map.getSource("warnings").setData(warn);
       map.getSource("impact").setData(imp); map.getSource("relief").setData(sites);
@@ -309,6 +315,14 @@ function renderImpact() {
 function areaContextHtml() {
   const c = state.actx || {}, g = c.gauges?.gauges || [], cty = c.county?.counties || [];
   let h = "";
+  const sv = state.services || [];
+  if (sv.length) {
+    const cut = sv.filter((v) => v.status === "cut off"), ok = sv.filter((v) => v.status === "reachable");
+    const by = {}; sv.forEach((v) => (by[v.kind] = (by[v.kind] || 0) + 1));
+    h += `<h4>Emergency services within 5 km</h4><div class="card"><div class="m">${Object.entries(by).map(([k, n]) => `${n} ${esc(k.toLowerCase())}${n > 1 && !k.endsWith("s") ? "s" : ""}`).join(" · ")}</div>
+      <div style="margin-top:6px"><b style="color:var(--blocked)">${cut.length} cut off</b> · ${ok.length} reachable inside the photos · ${sv.length - cut.length - ok.length} outside the photos</div>
+      ${cut.slice(0, 8).map((v) => `<div class="m">● ${esc(v.name)} (${esc(v.kind)})</div>`).join("")}</div>`;
+  }
   if (cty.length) h += `<h4>County flood insurance gap</h4>` + cty.map((r) => `<div class="card"><b>${esc(r.county)} County</b>
     <div class="m">${fmt(r.residential_structures_in_sfha)} homes in FEMA flood zones (${r.share_in_sfha_pct}%), only ${r.nfip_takeup_in_sfha_pct}% of them insured by NFIP</div></div>`).join("");
   if (g.length) h += `<h4>River gauges during the event</h4><table class="kv"><tr><td>Gauge</td><td>Peak vs flood stage</td></tr>` +
@@ -421,7 +435,16 @@ async function routeFrom(lngLat) {
     ${nb ? `<div class="callout">The usual shortest route (${fmt(naive.properties.length_m)} m) drives through <b>${nb} flooded road${nb > 1 ? "s" : ""}</b>. This route avoids them.</div>`
          : `<div class="callout ok">The usual shortest route is also dry here.</div>`}
     <ol class="steps">${r.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-    ${r.uncertain_edge_ids.length ? `<p class="m">Uses ${r.uncertain_edge_ids.length} road piece(s) we have no clear photo of. Drive slowly and turn around at any water.</p>` : ""}</div>`;
+    ${r.uncertain_edge_ids.length ? `<p class="m">Uses ${r.uncertain_edge_ids.length} road piece(s) we have no clear photo of. Drive slowly and turn around at any water.</p>` : ""}
+    ${servicesTable(r.services)}</div>`;
+}
+const km = (m) => (m === null || m === undefined ? "–" : m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`);
+function servicesTable(list) {
+  if (!list || !list.length) return "";
+  return `<h4>Emergency services near this route</h4><table class="kv svc"><tr><td>Service</td><td>Off the route</td><td>From you</td><td>By passable roads</td></tr>
+    ${list.slice(0, 8).map((v) => `<tr><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${SVC_COLORS[v.kind] || "#64748b"}"></span> ${esc(v.name)} <span class="m">${esc(v.kind)}</span></td>
+      <td>${km(v.off_route_m)}</td><td>${km(v.from_start_m)}</td><td>${v.by_safe_road_m !== null ? km(v.by_safe_road_m) : v.inside_map ? "cut off" : "outside photos"}</td></tr>`).join("")}</table>
+    <p class="note">Straight-line distances, approximate. "By passable roads" follows the safe network where it is mapped.</p>`;
 }
 
 function showZone(id) {
@@ -477,9 +500,9 @@ function wireMap() {
   map.on("mouseleave", "zones-fill", () => { if (zHover) highlightZone(zHover, false); zHover = null; });
   map.on("click", (e) => {
     if (state.routing) return routeFrom(e.lngLat);
-    const layers = ["reports", "crossings", "sensors", "roads", "relief-fill", "impact", "facilities", "zones-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
+    const layers = ["services", "reports", "crossings", "sensors", "roads", "relief-fill", "impact", "facilities", "zones-fill"].filter((l) => map.getLayer(l) && map.getLayoutProperty(l, "visibility") !== "none");
     const hit = map.queryRenderedFeatures(e.point, { layers });
-    const pt = hit.find((h) => ["reports", "crossings", "sensors"].includes(h.layer.id));
+    const pt = hit.find((h) => ["services", "reports", "crossings", "sensors"].includes(h.layer.id));
     if (pt) return showPoint(pt.layer.id, pt.properties);
     const road = hit.find((h) => h.layer.id === "roads");
     if (road && road.properties.status !== "outside") return showSegment(road.properties.id);
@@ -494,7 +517,12 @@ function wireMap() {
 
 function showPoint(kind, p) {
   $("#evidence").classList.remove("collapsed"); $("#ev-body").classList.add("one");
-  if (kind === "reports") {
+  if (kind === "services") {
+    $("#ev-title").textContent = `${p.kind}: ${p.name}`;
+    $("#ev-body").innerHTML = `<div><p>${p.status === "cut off" ? `<b style="color:var(--blocked)">Cut off.</b> No passable road links it to the edge of the photographed area.` :
+      p.status === "reachable" ? "Reachable over passable roads." : "Outside the photographed area, so its roads were not checked."}</p>
+      <p class="m">From OpenStreetMap. Press Route me out near it to see the way in.</p></div>`;
+  } else if (kind === "reports") {
     $("#ev-title").textContent = `NOAA storm report: ${p.type} · ${p.date}`;
     $("#ev-body").innerHTML = `<div><p>${esc(p.place || "")}${p.county ? `, ${esc(p.county)} County` : ""}</p>
       <p class="reason">${esc(p.narrative || "No narrative.")}</p><p class="m">Deaths ${fmt(Number(p.deaths))} · reported property damage ${usd(Number(p.damage_usd))}. Source: NOAA NCEI Storm Events.</p></div>`;
@@ -596,7 +624,7 @@ document.querySelectorAll("[data-layer]").forEach((cb) => cb.addEventListener("c
   const vis = cb.checked ? "visible" : "none";
   const ids = { post: ["img"], roads: ["roads", "roads-casing", "roads-dash"], zones: ["zones-fill", "zones-line"], facilities: ["facilities"],
     buildings: ["buildings"], relief: ["relief-fill", "relief-line"], impact: ["impact"], warnings: ["warnings"],
-    reports: ["reports"], crossings: ["crossings"], sensors: ["sensors"] }[cb.dataset.layer];
+    reports: ["reports"], crossings: ["crossings"], sensors: ["sensors"], services: ["services"] }[cb.dataset.layer];
   ids.forEach((id) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", vis));
   if (cb.dataset.layer === "zones") state.markers.forEach((m) => (m.getElement().style.display = cb.checked ? "" : "none"));
 }));

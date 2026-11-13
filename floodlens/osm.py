@@ -336,6 +336,8 @@ def emergency_services(s: Settings, radius_m: float = 5000, log=print) -> list[d
         if not kind:
             continue
         p = r.geometry.representative_point()
-        out.append({"id": f"{r.get('element')}/{r.get('id')}", "name": r.get("name") if r.get("name") not in (None, "None") else kind,
+        nm = r.get("name")
+        nm = nm if isinstance(nm, str) and nm not in ("None", "nan", "") else kind
+        out.append({"id": f"{r.get('element')}/{r.get('id')}", "name": nm,
                     "kind": kind, "lon": round(p.x, 6), "lat": round(p.y, 6)})
     return out

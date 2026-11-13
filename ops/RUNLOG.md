@@ -66,3 +66,7 @@
 | 20261113T204345Z | fetch-data simonton | ok | 0.7s | 8eb1366 | RR191131IP01 |  |
 | 20261113T204346Z | imagery simonton | ok | 1.5s | 8eb1366 | RR191131IP01 |  |
 | 20261113T204347Z | fetch-data hill_country | ok | 9.4s | 8eb1366 | RR191131IP01 |  |
+| 20261113T204357Z | imagery hill_country | ok | 12.7s | 68bc20c | RR191131IP01 |  |
+| 20261113T204345Z | label kingwood | ok | 127.2s | 68bc20c | RR191131IP01 |  |
+| 20261113T204552Z | fetch-context kingwood | ok | 16.4s | 68bc20c | RR191131IP01 |  |
+| 20261113T204609Z | analyze kingwood | ok | 2.9s | 68bc20c | RR191131IP01 |  |
