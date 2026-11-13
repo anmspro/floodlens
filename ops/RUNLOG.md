@@ -34,3 +34,5 @@
 | 20261113T193957Z | impact bevil_oaks | ok | 91.0s | 05255d6 | RR191131IP01 |  |
 | 20261113T194147Z | impact bevil_oaks | ok | 86.2s | 05255d6 | RR191131IP01 |  |
 | 20261113T194401Z | relief bevil_oaks | ok | 63.2s | 05255d6 | RR191131IP01 |  |
+| 20261113T194055Z | prepare kingwood | ok | 583.9s | d708896 | RR191131IP01 |  |
+| 20261113T195039Z | chips kingwood | ok | 7.3s | d708896 | RR191131IP01 |  |
