@@ -334,9 +334,12 @@ class Network:
         reach = nx.single_source_dijkstra_path_length(L, start, weight="len") if start in L else {}
         cov = None
         out = []
+        import math
         for sv in svcs:
             px, py = self.to_utm.transform(sv["lon"], sv["lat"])
             p = Point(px, py)
+            if not all(map(math.isfinite, (px, py, line.distance(p)))):
+                continue
             dn = ((xy[:, 0] - px) ** 2 + (xy[:, 1] - py) ** 2)
             k = int(dn.argmin())
             near_node, gap = ids[k], float(dn[k] ** 0.5)

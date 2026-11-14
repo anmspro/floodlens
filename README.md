@@ -4,10 +4,13 @@ FloodLens finds the streets that became islands after a flood. It compares aeria
 
 The repository contains a Python pipeline that prepares each area, a FastAPI backend, a MapLibre web interface and an MCP server.
 
+![FloodLens](docs/screenshots/01_overview.jpg)
+
 ![Pipeline](docs/pipeline.svg)
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [How it works](#how-it-works)
 - [Areas](#areas)
 - [Repository layout](#repository-layout)
@@ -21,6 +24,42 @@ The repository contains a Python pipeline that prepares each area, a FastAPI bac
 - [Evaluation](#evaluation)
 - [Data sources](#data-sources)
 - [Licence](#licence)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Overview](docs/screenshots/01_overview.jpg) | **Overview**<br>West Houston on 30 August 2017. Headline numbers, road status, ranked cut-off neighbourhoods. |
+| ![Before and after swipe](docs/screenshots/02_compare_before_after.jpg) | **Before and after swipe**<br>Drag the divider to compare the 2016 and 2017 photos on the map. |
+| ![Road evidence](docs/screenshots/03_road_evidence.jpg) | **Road evidence**<br>Before/after crop of one road, both model answers, the decision rule and the context for that place. |
+| ![Cut-off neighbourhood](docs/screenshots/04_cutoff_neighbourhood.jpg) | **Cut-off neighbourhood**<br>People, census vulnerability and the flooded roads to clear first. |
+| ![Dispatch brief in Spanish](docs/screenshots/05_dispatch_brief_spanish.jpg) | **Dispatch brief in Spanish**<br>Brief and resident alert written by the chat model; every number checked against the data. |
+| ![Dispatch brief in English](docs/screenshots/06_dispatch_brief_english.jpg) | **Dispatch brief in English**<br>The same brief in English. Saved copies are used when the model cannot be reached. |
+| ![Safe route](docs/screenshots/07_safe_route.jpg) | **Safe route**<br>Safest way out next to the usual shortest route, with the flooded roads that route would cross. |
+| ![Emergency services near a route](docs/screenshots/08_route_emergency_services.jpg) | **Emergency services near a route**<br>Distance off the route, from the start and by passable roads. |
+| ![No dry road out](docs/screenshots/09_no_dry_road_out.jpg) | **No dry road out**<br>Shelter-in-place message when no passable road leads out. |
+| ![Relief site](docs/screenshots/10_relief_site.jpg) | **Relief site**<br>A dry parking lot checked by the model, its checks, recommended use and people served. |
+| ![Impact estimate](docs/screenshots/11_impact_estimate.jpg) | **Impact estimate**<br>Home damage with a range, homes surrounded by water, market effect and farmland. |
+| ![Home check](docs/screenshots/12_home_damage_check.jpg) | **Home check**<br>One sampled home: water before and after, tract value and estimated damage. |
+| ![Method and emergency services](docs/screenshots/13_impact_method_and_services.jpg) | **Method and emergency services**<br>How the estimate was made, the insured-claims check and cut-off emergency services. |
+| ![River gauges](docs/screenshots/14_river_gauges.jpg) | **River gauges**<br>Peak stage against flood stage during the event, and whether it was above flood stage on the photo day. |
+| ![Review queue](docs/screenshots/15_check_review_queue.jpg) | **Review queue**<br>People confirm or correct the model with one click or key. |
+| ![NOAA storm report](docs/screenshots/16_noaa_storm_report.jpg) | **NOAA storm report**<br>Official flood reports near the area with their description. |
+| ![Cut-off emergency service](docs/screenshots/17_emergency_service_cut_off.jpg) | **Cut-off emergency service**<br>A hospital with no passable road to the edge of the photographed area. |
+| ![NWS flood warnings](docs/screenshots/18_nws_flood_warnings.jpg) | **NWS flood warnings**<br>Warning polygons issued during the event. |
+| ![Offline drill](docs/screenshots/19_offline_drill.jpg) | **Offline drill**<br>Every source falls back to its saved snapshot and the app keeps working. |
+| ![Confirmed only, underwater roads](docs/screenshots/20_confirmed_only_underwater_filter.jpg) | **Confirmed only, underwater roads**<br>Strict mode counts only roads seen dry; the legend filters the map. |
+| ![Dark theme, ranked by people](docs/screenshots/21_dark_theme_rank_by_people.jpg) | **Dark theme, ranked by people**<br>Theme switch (system, light, dark) and the alternative ranking. |
+| ![First-visit guide](docs/screenshots/22_first_visit_guide.jpg) | **First-visit guide**<br>Three steps to read the map. |
+| ![Full map](docs/screenshots/23_layers_collapsed_full_map.jpg) | **Full map**<br>Layers panel collapsed. |
+| ![Kingwood and Forest Cove](docs/screenshots/24_area_kingwood.jpg) | **Kingwood and Forest Cove**<br>Hurricane Harvey, 31 August 2017. |
+| ![Richmond and Rosenberg](docs/screenshots/25_area_richmond.jpg) | **Richmond and Rosenberg**<br>Hurricane Harvey, 31 August 2017. |
+| ![Bevil Oaks](docs/screenshots/26_area_bevil_oaks.jpg) | **Bevil Oaks**<br>Hurricane Harvey, 1 September 2017. |
+| ![Texas Hill Country](docs/screenshots/27_area_hill_country_partial.jpg) | **Texas Hill Country**<br>Guadalupe River flood, July 2025 (after photos only). |
+| ![Simonton](docs/screenshots/28_area_simonton.jpg) | **Simonton**<br>Hurricane Harvey, 3 September 2017. |
+| ![San Antonio](docs/screenshots/29_area_san_antonio_partial.jpg) | **San Antonio**<br>156 low-water crossings, SmartSA sensors and emergency services. |
+| ![SmartSA flood sensor](docs/screenshots/30_smartsa_flood_sensor.jpg) | **SmartSA flood sensor**<br>Readings, alerts and the largest water rise recorded. |
+| ![Low-water crossing](docs/screenshots/31_low_water_crossing.jpg) | **Low-water crossing**<br>Closed in the heavy-rain scenario. |
 
 ## How it works
 

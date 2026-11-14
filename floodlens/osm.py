@@ -306,12 +306,15 @@ SERVICE_KIND = [("hospital", "Hospital"), ("urgent_care", "Urgent care"), ("clin
                 ("fire_station", "Fire station"), ("police", "Police"), ("ambulance_station", "Ambulance (EMS)")]
 
 
-def emergency_services(s: Settings, radius_m: float = 5000, log=print) -> list[dict]:
-    """Hospitals, urgent care, clinics, fire, police and EMS within radius of the area (one cached query)."""
+def emergency_services(s: Settings, radius_m: float = 5000, log=print, fetch: bool = False) -> list[dict]:
+    """Hospitals, urgent care, clinics, fire, police and EMS within radius of the area (one cached query).
+    The web app calls this with fetch=False so a request never waits on Overpass; `fetch-context` downloads."""
     import geopandas as gpd
     snap = snapshot_dir(s) / "services.gpkg"
     if snap.exists():
         g = gpd.read_file(snap)
+    elif not fetch:
+        return []
     else:
         _osmnx_settings(s)
         try:

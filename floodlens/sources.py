@@ -14,6 +14,7 @@ Sources
 from __future__ import annotations
 
 import json
+import math
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -282,7 +283,8 @@ def fetch_county_homes(s: Settings, log=print) -> Path | None:
     import pandas as pd
     fp = _download_once(s, FLOOD_HOMES_URL, "flood_zone_homes_by_county_2026.csv")
     d = pd.read_csv(fp, dtype={"fips": str})
-    rows = d[d.fips.isin(_area_counties(s))].to_dict("records")
+    rows = [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in r.items()}
+            for r in d[d.fips.isin(_area_counties(s))].to_dict("records")]
     o = snap_dir(s)
     o.mkdir(parents=True, exist_ok=True)
     (o / "county_homes.json").write_text(json.dumps({"fetched_at": now_iso(), "counties": rows}, default=str))
@@ -299,6 +301,11 @@ def fetch_all(s: Settings, log=print) -> dict:
         except Exception as e:  # noqa: BLE001
             out[name] = f"FAILED: {type(e).__name__}: {e}"
             log(f"[{s.area_id}] {name} failed: {e}")
+    try:
+        from floodlens.osm import emergency_services
+        out["services"] = len(emergency_services(s, log=log, fetch=True))
+    except Exception as e:  # noqa: BLE001
+        out["services"] = f"FAILED: {e}"
     try:
         out["nws_live"] = nws_live(s)["meta"]["status"]
     except Exception as e:  # noqa: BLE001

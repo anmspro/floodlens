@@ -63,7 +63,9 @@ function PAD() {
   const px = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
   const gap = px("--gap");
   const left = document.body.classList.contains("left-closed") ? 0 : px("--left-w");
-  return { top: px("--top-h") + 150, left: left + 3 * gap, right: px("--right-w") + 3 * gap + 50, bottom: 70 };
+  const ev = document.getElementById("evidence");
+  const bottom = ev && !ev.classList.contains("collapsed") ? Math.round(window.innerHeight * 0.44) + 30 : 70;
+  return { top: px("--top-h") + 150, left: left + 3 * gap, right: px("--right-w") + 3 * gap + 50, bottom };
 }
 
 function bboxOf(geom) {
@@ -207,7 +209,7 @@ function renderKpis() {
   const dmg = state.impact?.homes?.est_building_damage_usd;
   $("#kpis").innerHTML = `
     ${s.partial ? `<button class="kpi"><div class="v">…</div><div class="l">still processing: photos shown, results soon</div></button>` : ""}
-    <button class="kpi alert" data-kpi="zones"><div class="v">~${fmt(s.people_cut_off?.[m])}</div><div class="l">people with no dry road out · ${fmt(nZ)} neighbourhoods</div></button>
+    <button class="kpi alert" data-kpi="zones"><div class="v">~${fmt(s.people_cut_off?.[m])}</div><div class="l">people with no dry road out · ${fmt(nZ)} neighbourhood${nZ === 1 ? "" : "s"}</div></button>
     <button class="kpi" data-kpi="blocked"><div class="v">${fmt(seg.blocked)} <span class="m">of ${fmt(seen)}</span></div><div class="l">road pieces underwater</div></button>
     <button class="kpi ${facs.length ? "alert" : ""}" data-kpi="facilities" title="${esc(facs.join(", "))}"><div class="v">${fmt(facs.length)}</div><div class="l">${facs.length ? `facilities cut off, incl. ${esc(facs[0])}` : "facilities cut off"}</div></button>
     <button class="kpi" data-kpi="impact"><div class="v">${dmg?.mid ? usd(dmg.mid) : "–"}</div><div class="l">${dmg?.mid ? `estimated home damage (${usd(dmg.low)} to ${usd(dmg.high)})` : "home damage not estimated yet"}</div></button>`;
@@ -319,12 +321,12 @@ function areaContextHtml() {
   if (sv.length) {
     const cut = sv.filter((v) => v.status === "cut off"), ok = sv.filter((v) => v.status === "reachable");
     const by = {}; sv.forEach((v) => (by[v.kind] = (by[v.kind] || 0) + 1));
-    h += `<h4>Emergency services within 5 km</h4><div class="card"><div class="m">${Object.entries(by).map(([k, n]) => `${n} ${esc(k.toLowerCase())}${n > 1 && !k.endsWith("s") ? "s" : ""}`).join(" · ")}</div>
+    h += `<h4>Emergency services within 5 km</h4><div class="card"><div class="m">${Object.entries(by).map(([k, n]) => `${n} ${esc(k.toLowerCase())}${n > 1 && !k.endsWith("s") && k !== "Police" && !k.includes("(") ? "s" : ""}`).join(" · ")}</div>
       <div style="margin-top:6px"><b style="color:var(--blocked)">${cut.length} cut off</b> · ${ok.length} reachable inside the photos · ${sv.length - cut.length - ok.length} outside the photos</div>
       ${cut.slice(0, 8).map((v) => `<div class="m">● ${esc(v.name)} (${esc(v.kind)})</div>`).join("")}</div>`;
   }
   if (cty.length) h += `<h4>County flood insurance gap</h4>` + cty.map((r) => `<div class="card"><b>${esc(r.county)} County</b>
-    <div class="m">${fmt(r.residential_structures_in_sfha)} homes in FEMA flood zones (${r.share_in_sfha_pct}%), only ${r.nfip_takeup_in_sfha_pct}% of them insured by NFIP</div></div>`).join("");
+    <div class="m">${r.residential_structures_in_sfha !== null ? `${fmt(r.residential_structures_in_sfha)} homes in FEMA flood zones (${r.share_in_sfha_pct}%)` : `${fmt(r.residential_structures)} homes`}${r.nfip_takeup_in_sfha_pct !== null ? `, only ${r.nfip_takeup_in_sfha_pct}% of flood-zone homes insured by NFIP` : `, ${fmt(r.nfip_residential_policies_in_sfha)} NFIP policies in flood zones`}</div></div>`).join("");
   if (g.length) h += `<h4>River gauges during the event</h4><table class="kv"><tr><td>Gauge</td><td>Peak vs flood stage</td></tr>` +
     g.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.peak_stage} ${esc(x.unit || "")}${x.flood_stage ? ` vs ${x.flood_stage}` : ""}${x.above_flood_stage_on_photo_day ? " · <b>above flood stage on photo day</b>" : ""}</td></tr>`).join("") + `</table>`;
   return h;
@@ -397,7 +399,7 @@ async function showSegment(id) {
       ${t ? `<tr><td>FEMA zone</td><td>${esc(fema)}${t.fema_sfha_tf === "T" ? " · 100-year floodplain" : ""}</td></tr>
       <tr><td>Rain, 3 days before</td><td>${esc(t.preceding_3d_precipitation_mm ?? "–")} mm</td></tr>
       <tr><td>River gauge</td><td>${esc(t.usgs_gage_height_station_name ?? "–")}</td></tr>` : ""}
-      <tr><td>NWS warning ${badge(warn?.meta)}</td><td>${warn?.data?.length ? esc(warn.data.map((x) => `${x.type} ${x.sig === "W" ? "Warning" : x.sig}`).join(", ")) : warn?.data ? "none active that day" : "–"}</td></tr>
+      <tr><td>NWS warning ${badge(warn?.meta)}</td><td>${warn?.data?.length ? esc(Object.entries(warn.data.reduce((a, x) => { const k = `${x.type} ${x.sig === "W" ? "Warning" : x.sig}`; a[k] = (a[k] || 0) + 1; return a; }, {})).map(([k, n]) => n > 1 ? `${k} ×${n}` : k).join(", ")) : warn?.data ? "none active that day" : "–"}</td></tr>
       <tr><td>Tract SVI ${badge(svi?.meta)}</td><td>${svi?.data ? `${Math.round((svi.data.RPL_THEMES || 0) * 100)}th percentile · 65+ ${svi.data.EP_AGE65}% · no car ${svi.data.EP_NOVEH}%` : "–"}</td></tr>
       <tr><td>Elevation ${badge(el?.meta)}</td><td>${el?.data ? `${el.data.elevation_m} m (${el.data.relative_m >= 0 ? "+" : ""}${el.data.relative_m} m vs 300 m around)` : "–"}</td></tr></table>
       <p class="note">Station readings and tract figures are context near this road, not measurements on it.</p>`;
